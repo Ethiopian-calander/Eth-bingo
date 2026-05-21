@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Ethbingo</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, remove, push }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBjytgeMiPqurBL5IXxuI8QrWtsxhixb8s",
+  authDomain: "bingo-4c196.firebaseapp.com",
+  databaseURL: "https://bingo-4c196-default-rtdb.firebaseio.com",
+  projectId: "bingo-4c196",
+  storageBucket: "bingo-4c196.firebasestorage.app",
+  messagingSenderId: "459938061689",
+  appId: "1:459938061689:web:f1c7703f367d630c9ba3a8"
+};
+
+// ── TELEGRAM INIT ─────────────────────────────────────────────
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const tgUser = tg?.initDataUnsafe?.user;
+const SERVER = window.location.origin;
+
+// ── STATE ─────────────────────────────────────────────────────
+let myUser = null, myNumber = null, myCard = [], myMarked = new Set([12]);
+let players = {}, calledBalls = [], gameOver = false, winnerAlreadySet = false;
+let waitTimer = null, waitSecs = 30, gameCounter = 1;
+let db, unsubPlayers=null, unsubGame=null, unsubBalls=null, unsubWinner=null, unsubLobbyGame=null;
+let ballCallerInterval = null;
+
+// ── FIREBASE ──────────────────────────────────────────────────
+const app2 = initializeApp(firebaseConfig);
+db = getDatabase(app2);
+function r(path) { return ref(db, path); }
+
+// ── INIT ──────────────────────────────────────────────────────
+async function init() {
+  // Load or create user
+  if (tgUser) {
+    const res = await fetch(`${SERVER}/api/user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegramId: tgUser.id, name: tgUser.first_name })
+    });
+    myUser = await res.json();
+  } else {
+    // Demo fallback (browser testing)
+    myUser = { telegramId: 'demo_' + Date.now(), name: 'Demo Player', credits: 100 };
+  }
+  updateBalanceUI();
+
+  // Clean stale firebase data
+  try {
+    const cSnap = await get(r('gameCounter'));
+    const currentCount = cSnap.val() || 1;
+    const playersSnap = await get(r('lobby/players'));
+    const now = Date.now();
+    const pData = playersSnap.val() || {};
+    const activePlayers = Object.values(pData).filter(p => (now-(p.joinedAt||0)) < 120000);
+    if (activePlayers.length === 0) {
+      await remove(r('game')); await remove(r('lobby'));
+      await set(r('gameCounter'), currentCount);
+    }
+  } catch(e) {}
+
+  onValue(r('gameCounter'), snap => {
+    gameCounter = snap.val() || 1;
+    document.getElementById('lobbyGameNum').textContent = 'Game #' + gameCounter;
+    document.getElementById('waitGameNum').textContent  = 'Game #' + gameCounter;
+    document.getElementById('gameScreenNum').textContent = 'Game #' + gameCounter;
+  });
+
+  buildPicker();
+  show('lobbyScreen');
+}
+
+function updateBalanceUI() {
+  const bal = myUser?.credits ?? 0;
+  document.querySelectorAll('.balance-display').forEach(el => el.textContent = '$' + bal);
+}
+
+// ── HELPERS ───────────────────────────────────────────────────
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+function letterOf(n){if(n<=15)return'B';if(n<=30)return'I';if(n<=45)return'N';if(n<=60)return'G';return'O';}
+function ballGrad(l){return{B:'linear-gradient(135deg,#c87d00,#f5c842)',I:'linear-gradient(135deg,#a00d40,#ff4d8f)',N:'linear-gradient(135deg,#007a8c,#00e5ff)',G:'linear-gradient(135deg,#128030,#39ff6e)',O:'linear-gradient(135deg,#5a10a8,#bf8fff)'}[l]}
+function ballGlow(l){return{B:'0 0 28px rgba(245,200,66,.55)',I:'0 0 28px rgba(255,77,143,.55)',N:'0 0 28px rgba(0,229,255,.55)',G:'0 0 28px rgba(57,255,110,.55)',O:'0 0 28px rgba(191,143,255,.55)'}[l]}
+function detachAll() {
+  [unsubPlayers,unsubGame,unsubBalls,unsubWinner,unsubLobbyGame].forEach(u=>u&&u());
+  unsubPlayers=unsubGame=unsubBalls=unsubWinner=unsubLobbyGame=null;
+  stopBallCaller();
+}
+
+// ── NUMBER PICKER ─────────────────────────────────────────────
+function buildPicker() {
+  const grid = document.getElementById('numGrid');
+  grid.innerHTML = '';
+  for (let i=1;i<=100;i++) {
+    const b = document.createElement('div');
+    b.className='num-btn'; b.textContent=i; b.id='nb'+i;
+    b.onclick=()=>pickNumber(i); grid.appendChild(b);
+  }
+  onValue(r('game/started'), snap => {
+    const inProgress = snap.val()===true;
+    document.getElementById('gameGate').style.display = inProgress ? 'flex' : 'none';
+    document.getElementById('numGrid').style.pointerEvents = inProgress ? 'none' : 'auto';
+    document.getElementById('numGrid').style.opacity = inProgress ? '0.3' : '1';
+  });
+  onValue(r('lobby/taken'), snap => {
+    const taken=snap.val()||{};
+    for(let i=1;i<=100;i++){
+      const el=document.getElementById('nb'+i); if(!el)continue;
+      el.className='num-btn';
+      if(taken[i]&&taken[i]!==myNumber) el.classList.add('taken');
+      else if(taken[i]===myNumber) el.classList.add('mine');
+    }
+  });
+}
+
+async function pickNumber(n) {
+  if (!myUser) return;
+  if (myUser.credits < 10) { toast('Not enough credits! Need $10 to play.'); return; }
+  const gameSnap = await get(r('game/started'));
+  if (gameSnap.val()===true) { toast('Game in progress! Wait for next game.'); return; }
+  const el = document.getElementById('nb'+n);
+  if(!el||el.classList.contains('taken')) return;
+  try {
+    const snap = await get(r('lobby/taken/'+n));
+    if(snap.exists()&&snap.val()!==myNumber){toast('Already taken!');return;}
+    // Deduct entry fee
+    const joinRes = await fetch(`${SERVER}/api/join`, {
+      method: 'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ telegramId: myUser.telegramId })
+    });
+    const joinData = await joinRes.json();
+    if (!joinRes.ok) { toast(joinData.error || 'Failed to join'); return; }
+    myUser.credits = joinData.newBalance;
+    updateBalanceUI();
+    if(myNumber&&myNumber!==n){
+      await remove(r('lobby/taken/'+myNumber));
+      await remove(r('lobby/players/'+myNumber));
+    }
+    myNumber=n;
+    await set(r('lobby/taken/'+n),n);
+    await set(r('lobby/players/'+n),{boardNum:n,joinedAt:Date.now(),telegramId:myUser.telegramId});
+    enterWaiting();
+  } catch(e){toast('Error: '+e.message);}
+}
+
+// ── WAITING ───────────────────────────────────────────────────
+function enterWaiting() {
+  detachAll();
+  show('waitingScreen');
+  document.getElementById('myPickedNum').textContent=myNumber;
+  waitSecs=30; updateRing(30);
+  unsubPlayers=onValue(r('lobby/players'),snap=>{
+    players=snap.val()||{};
+    const count=Object.keys(players).length;
+    document.getElementById('waitCount').textContent=count===1?'1 player in lobby':count+' players in lobby';
+    if(count>=2){
+      document.getElementById('ringWrap').style.display='flex';
+      document.getElementById('waitHint').textContent='Game starting soon…';
+      if(!waitTimer)startCountdown();
+    } else {
+      document.getElementById('ringWrap').style.display='none';
+      document.getElementById('waitHint').textContent='Waiting for another player…';
+      clearInterval(waitTimer);waitTimer=null;waitSecs=30;updateRing(30);
+    }
+  });
+  unsubLobbyGame=onValue(r('game/started'),snap=>{
+    if(snap.val()===true){clearInterval(waitTimer);waitTimer=null;beginGame();}
+  });
+}
+
+function startCountdown(){
+  waitTimer=setInterval(async()=>{
+    waitSecs--;updateRing(waitSecs);
+    if(waitSecs<=0){
+      clearInterval(waitTimer);waitTimer=null;
+      const nums=Object.keys(players).map(Number);
+      if(Math.min(...nums)===myNumber)await launchGame();
+    }
+  },1000);
+}
+function updateRing(v){
+  document.getElementById('ringNum').textContent=v;
+  const fill=document.getElementById('ringArc');
+  fill.style.strokeDashoffset=283*(1-v/30);
+  fill.style.stroke=v<=8?'#ff4d8f':v<=18?'#f5c842':'#00e5ff';
+}
+
+// ── LAUNCH ────────────────────────────────────────────────────
+async function launchGame(){
+  await remove(r('game'));
+  await set(r('game'),{started:true,winner:null,startedAt:Date.now(),lastBallAt:Date.now(),ballCount:0});
+  startBallCaller();
+}
+
+function startBallCaller(){
+  stopBallCaller();
+  ballCallerInterval=setInterval(tryCallBall,3000);
+}
+function stopBallCaller(){
+  if(ballCallerInterval){clearInterval(ballCallerInterval);ballCallerInterval=null;}
+}
+async function tryCallBall(){
+  if(gameOver||winnerAlreadySet)return;
+  try{
+    const gameSnap=await get(r('game'));
+    const gameData=gameSnap.val();
+    if(!gameData||!gameData.started||gameData.winner)return;
+    const now=Date.now();
+    if(now-(gameData.lastBallAt||0)<2800)return;
+    const playersSnap=await get(r('lobby/players'));
+    const pData=playersSnap.val()||{};
+    const activeNums=Object.keys(pData).map(Number).filter(n=>(now-(pData[n].joinedAt||0))<300000);
+    if(!activeNums.length)return;
+    if(Math.min(...activeNums)!==myNumber)return;
+    const existing=gameData.balls?Object.values(gameData.balls):[];
+    if(existing.length>=75)return;
+    const pool=[];for(let i=1;i<=75;i++)if(!existing.includes(i))pool.push(i);
+    if(!pool.length)return;
+    const ball=pool[Math.floor(Math.random()*pool.length)];
+    await push(r('game/balls'),ball);
+    await set(r('game/lastBallAt'),Date.now());
+  }catch(e){}
+}
+
+// ── GAME ──────────────────────────────────────────────────────
+function beginGame(){
+  detachAll();gameOver=false;winnerAlreadySet=false;
+  generateCard();renderCard();
+  show('gameScreen');
+  document.getElementById('myBoardBadge').textContent='#'+myNumber;
+  startBallCaller();
+  unsubBalls=onValue(r('game/balls'),snap=>{
+    calledBalls=snap.val()?Object.values(snap.val()):[];
+    calledBalls.forEach(n=>autoMark(n));
+    refreshDisplay();updateStats();checkWin();
+  });
+  unsubWinner=onValue(r('game/winner'),snap=>{
+    const w=snap.val();if(w&&w.boardNum)showWinner(w);
+  });
+  unsubPlayers=onValue(r('lobby/players'),snap=>{
+    players=snap.val()||{};
+    renderPlayerList();
+    document.getElementById('sPlayers').textContent=Object.keys(players).length;
+  });
+}
+
+function autoMark(n){
+  myCard.forEach((cell,i)=>{
+    if(i===12)return;
+    if(cell.num===n&&!myMarked.has(i)){myMarked.add(i);document.querySelector(`[data-i="${i}"]`)?.classList.add('marked');}
+  });
+}
+function toggleMark(i){
+  if(!calledBalls.includes(myCard[i]?.num)){toast('Not called yet!');return;}
+  if(myMarked.has(i)){myMarked.delete(i);document.querySelector(`[data-i="${i}"]`)?.classList.remove('marked');}
+  else{myMarked.add(i);document.querySelector(`[data-i="${i}"]`)?.classList.add('marked');}
+  updateStats();checkWin();
+}
+function refreshDisplay(){
+  if(!calledBalls.length)return;
+  const latest=calledBalls[calledBalls.length-1];const letter=letterOf(latest);
+  const ball=document.getElementById('callerBall');
+  ball.classList.remove('pop');void ball.offsetWidth;ball.classList.add('pop');
+  ball.style.background=ballGrad(letter);ball.style.boxShadow=ballGlow(letter);ball.style.color='#1a1200';
+  ball.textContent=latest;
+  document.getElementById('callerLetter').textContent=letter;
+  document.getElementById('callerBig').textContent=letter+'-'+latest;
+  const wrap=document.getElementById('calledWrap');wrap.innerHTML='';
+  [...calledBalls].reverse().forEach((n,idx)=>{
+    const c=document.createElement('div');c.className='chip'+(idx===0?' fresh':'');
+    c.textContent=letterOf(n)+n;wrap.appendChild(c);
+  });
+}
+function updateStats(){
+  document.getElementById('sCalled').textContent=calledBalls.length;
+  document.getElementById('sRemain').textContent=75-calledBalls.length;
+  document.getElementById('sMarked').textContent=myMarked.size;
+}
+function renderPlayerList(){
+  const wrap=document.getElementById('playersList');if(!wrap)return;wrap.innerHTML='';
+  Object.keys(players).forEach(n=>{
+    const p=document.createElement('div');p.className='ppill';
+    p.innerHTML=`<span class="pdot"></span>#${n}${parseInt(n)===myNumber?' <b style="color:var(--gold)">(you)</b>':''}`;
+    wrap.appendChild(p);
+  });
+}
+function generateCard(){
+  myCard=[];const ranges=[[1,15],[16,30],[31,45],[46,60],[61,75]];
+  for(let row=0;row<5;row++)for(let c=0;c<5;c++)myCard.push({col:c,row,num:null});
+  for(let c=0;c<5;c++){
+    const[lo,hi]=ranges[c],nums=[];
+    while(nums.length<5){const n=Math.floor(Math.random()*(hi-lo+1))+lo;if(!nums.includes(n))nums.push(n);}
+    for(let row=0;row<5;row++)myCard[row*5+c].num=nums[row];
+  }
+}
+function renderCard(){
+  const g=document.getElementById('bingoGrid');g.innerHTML='';myMarked=new Set([12]);
+  myCard.forEach((cell,i)=>{
+    const d=document.createElement('div');d.className='cell';d.dataset.i=i;
+    if(i===12){d.classList.add('free','marked');d.textContent='FREE';}
+    else{d.textContent=cell.num;d.onclick=()=>toggleMark(i);}
+    g.appendChild(d);
+  });
+}
+
+const WIN_LINES=[[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
+
+async function checkWin(){
+  if(gameOver||winnerAlreadySet)return;
+  for(const line of WIN_LINES){
+    if(line.every(i=>myMarked.has(i))){
+      winnerAlreadySet=true;
+      line.forEach(i=>document.querySelector(`[data-i="${i}"]`)?.classList.add('wcell'));
+      const snap=await get(r('game/winner'));
+      if(!snap.val()||!snap.val().boardNum){
+        await set(r('game/winner'),{boardNum:myNumber,telegramId:myUser.telegramId,ts:Date.now()});
+      }
+      return;
+    }
+  }
+}
+
+async function showWinner(w){
+  if(gameOver)return;
+  gameOver=true;stopBallCaller();detachAll();
+  const isMe=w.boardNum===myNumber;
+  let winnings=0;
+  if(isMe){
+    // Trigger payout
+    try{
+      const res=await fetch(`${SERVER}/api/payout`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({telegramId:myUser.telegramId})
+      });
+      const data=await res.json();
+      if(data.winnings){winnings=data.winnings;myUser.credits=data.newBalance;updateBalanceUI();}
+    }catch(e){}
+  }
+  document.getElementById('winTitle').textContent=isMe?'🎉 BINGO!':'GAME OVER';
+  document.getElementById('winMsg').textContent=isMe?`You won $${winnings} credits!`:'Better luck next time';
+  document.getElementById('winBoard').textContent='Board #'+w.boardNum+' wins!';
+  document.getElementById('winOverlay').classList.add('show');
+  if(isMe)spawnConfetti();
+}
+
+async function leaveGame(){
+  detachAll();clearInterval(waitTimer);waitTimer=null;
+  try{
+    if(myNumber){
+      await remove(r('lobby/players/'+myNumber));
+      await remove(r('lobby/taken/'+myNumber));
+    }
+    const snap=await get(r('lobby/players'));
+    const remaining=snap.val()?Object.keys(snap.val()).length:0;
+    if(remaining===0){
+      const cSnap=await get(r('gameCounter'));
+      await set(r('gameCounter'),(cSnap.val()||1)+1);
+      await remove(r('game'));await remove(r('lobby'));
+    }
+  }catch(e){}
+  myNumber=null;myCard=[];myMarked=new Set([12]);
+  calledBalls=[];players={};gameOver=false;winnerAlreadySet=false;
+  document.getElementById('winOverlay').classList.remove('show');
+  document.getElementById('calledWrap').innerHTML='';
+  document.getElementById('playersList').innerHTML='';
+  document.getElementById('ringWrap').style.display='none';
+  const cb=document.getElementById('callerBall');
+  cb.textContent='?';cb.style.cssText='';
+  document.getElementById('callerLetter').textContent='';
+  document.getElementById('callerBig').textContent='';
+  show('lobbyScreen');buildPicker();
+}
+
+function spawnConfetti(){
+  const cols=['#f5c842','#ff4d8f','#00e5ff','#39ff6e','#bf8fff','#fff'];
+  for(let i=0;i<90;i++){
+    setTimeout(()=>{
+      const c=document.createElement('div');c.className='confetti-p';
+      c.style.cssText=`left:${Math.random()*100}vw;top:-14px;background:${cols[~~(Math.random()*cols.length)]};width:${6+Math.random()*10}px;height:${6+Math.random()*10}px;animation-duration:${1.5+Math.random()*2.5}s;animation-delay:${Math.random()*.4}s`;
+      document.body.appendChild(c);setTimeout(()=>c.remove(),4500);
+    },i*28);
+  }
+}
+
+window.leaveGame=leaveGame;
+init();
+</script>
+<style>
+:root{--bg:#07070f;--card:#0f0f1b;--card2:#13131f;--border:#1e1e30;--gold:#f5c842;--gold2:#c87d00;--pink:#ff4d8f;--cyan:#00e5ff;--green:#39ff6e;--purple:#bf8fff;--white:#eeeef8;--muted:#55557a}
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{background:var(--bg);font-family:'DM Sans',sans-serif;color:var(--white);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background:radial-gradient(ellipse 70% 50% at 10% 10%,rgba(245,200,66,.07) 0%,transparent 55%),radial-gradient(ellipse 60% 50% at 90% 90%,rgba(255,77,143,.06) 0%,transparent 55%)}
+.screen{display:none;position:relative;z-index:1;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:20px 14px 40px}
+.screen.active{display:flex}
+#gameScreen.active{justify-content:flex-start;padding-top:14px}
+.logo{font-family:'Abril Fatface',serif;font-size:clamp(48px,10vw,90px);letter-spacing:8px;background:linear-gradient(135deg,var(--gold) 0%,var(--pink) 50%,var(--cyan) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 36px rgba(245,200,66,.35));line-height:1}
+.tagline{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.game-counter-badge{background:linear-gradient(135deg,rgba(245,200,66,.15),rgba(255,77,143,.15));border:1px solid rgba(245,200,66,.3);border-radius:20px;padding:5px 16px;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-top:8px}
+.balance-bar{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:7px 16px;margin-top:12px;font-size:14px;font-weight:700}
+.balance-bar span{color:var(--muted);font-size:11px;font-weight:400}
+.pick-lbl{margin:20px 0 10px;font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}
+.game-gate{display:none;flex-direction:column;align-items:center;gap:8px;background:rgba(255,77,143,.08);border:1px solid rgba(255,77,143,.3);border-radius:16px;padding:20px 32px;max-width:400px;width:100%;text-align:center;margin:12px 0}
+.gate-icon{font-size:36px}.gate-title{font-family:'Abril Fatface',serif;font-size:22px;color:var(--pink)}.gate-sub{font-size:13px;color:var(--muted);line-height:1.5}
+.num-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;max-width:560px;width:100%}
+@media(max-width:480px){.num-grid{grid-template-columns:repeat(8,1fr);gap:4px}}
+.num-btn{aspect-ratio:1;background:var(--card);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:clamp(10px,1.8vw,15px);font-weight:700;cursor:pointer;transition:all .17s;user-select:none}
+.num-btn:hover:not(.taken):not(.mine){border-color:var(--gold);background:#1b1b2c;transform:scale(1.1)}
+.num-btn.taken{background:#0c0c18;border-color:#16162a;color:#252540;cursor:not-allowed}
+.num-btn.mine{background:linear-gradient(135deg,var(--gold2),var(--gold));border-color:var(--gold);color:#1a1200;font-weight:800;box-shadow:0 0 14px rgba(245,200,66,.5);cursor:default}
+.wait-box{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:32px 36px;text-align:center;max-width:380px;width:100%}
+.wait-title{font-family:'Abril Fatface',serif;font-size:26px;color:var(--gold)}
+.wait-num{font-family:'Abril Fatface',serif;font-size:72px;line-height:1;background:linear-gradient(135deg,var(--gold),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:6px 0}
+.wait-sub{font-size:13px;color:var(--muted)}
+.pcount{display:flex;align-items:center;justify-content:center;gap:9px;margin:14px 0;font-size:16px;font-weight:700}
+.pdotpulse{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 1s infinite}
+.ring-wrap{flex-direction:column;align-items:center;margin:8px 0;display:none}
+.ring-wrap svg{transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:var(--border);stroke-width:6}.ring-arc{fill:none;stroke:var(--cyan);stroke-width:6;stroke-linecap:round;stroke-dasharray:283;stroke-dashoffset:0;transition:stroke-dashoffset .9s linear,stroke .3s}
+.ring-rel{position:relative;width:86px;height:86px}
+.ring-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Abril Fatface',serif;font-size:24px;color:var(--gold)}
+.wait-hint{font-size:12px;color:var(--muted);margin-top:6px}
+.topbar{width:100%;max-width:1000px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.game-logo{font-family:'Abril Fatface',serif;font-size:24px;color:var(--gold);letter-spacing:4px}
+.my-badge{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1200;font-weight:800;font-size:12px;letter-spacing:1px;padding:5px 12px;border-radius:20px}
+.leave-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:8px;font-size:11px;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif}
+.leave-btn:hover{border-color:#ff4d4d;color:#ff4d4d}
+.game-wrap{width:100%;max-width:1000px;display:grid;grid-template-columns:1fr 270px;gap:14px;align-items:start}
+@media(max-width:680px){.game-wrap{grid-template-columns:1fr}}
+.bingo-header{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:4px}
+.bingo-header span{font-family:'Abril Fatface',serif;font-size:clamp(18px,3.2vw,28px);text-align:center;padding:6px 0;border-radius:6px}
+.bingo-header span:nth-child(1){color:var(--gold);text-shadow:0 0 12px var(--gold)}
+.bingo-header span:nth-child(2){color:var(--pink);text-shadow:0 0 12px var(--pink)}
+.bingo-header span:nth-child(3){color:var(--cyan);text-shadow:0 0 12px var(--cyan)}
+.bingo-header span:nth-child(4){color:var(--green);text-shadow:0 0 12px var(--green)}
+.bingo-header span:nth-child(5){color:var(--purple);text-shadow:0 0 12px var(--purple)}
+.bingo-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.cell{aspect-ratio:1;background:var(--card);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:clamp(12px,2.4vw,20px);font-weight:700;cursor:pointer;transition:all .18s;user-select:none}
+.cell:hover:not(.marked):not(.free){border-color:var(--gold);background:#1a1a2c;transform:scale(1.05)}
+.cell.free{background:#0d0d1e;border-color:var(--cyan);color:var(--cyan);font-size:9px;letter-spacing:1px;text-transform:uppercase;cursor:default}
+.cell.marked{background:linear-gradient(135deg,var(--gold2),var(--gold));border-color:var(--gold);color:#1a1200;font-weight:800;box-shadow:0 0 12px rgba(245,200,66,.4);animation:cpop .25s ease}
+.cell.wcell{background:linear-gradient(135deg,var(--pink),#ff8c00);border-color:var(--pink);color:#fff;box-shadow:0 0 20px rgba(255,77,143,.7);animation:wpulse .55s ease infinite alternate}
+@keyframes cpop{0%{transform:scale(1.2)}100%{transform:scale(1)}}
+@keyframes wpulse{from{box-shadow:0 0 12px rgba(255,77,143,.5)}to{box-shadow:0 0 28px rgba(255,77,143,1)}}
+.sidebar{display:flex;flex-direction:column;gap:10px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px}
+.ptitle{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.caller-ball{width:78px;height:78px;border-radius:50%;background:linear-gradient(135deg,#1b1b2e,#11112a);margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-family:'Abril Fatface',serif;font-size:28px;color:var(--muted);transition:all .25s}
+.caller-ball.pop{animation:ballPop .4s cubic-bezier(.34,1.56,.64,1)}
+@keyframes ballPop{0%{transform:scale(0) rotate(-30deg);opacity:0}100%{transform:scale(1);opacity:1}}
+.cletter{text-align:center;font-size:10px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;min-height:14px}
+.cbig{text-align:center;font-family:'Abril Fatface',serif;font-size:15px;color:var(--white);min-height:22px}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+.stat-row:last-child{border-bottom:none}
+.slbl{font-size:11px;color:var(--muted)}.sval{font-weight:700;font-size:13px}
+.called-wrap{display:flex;flex-wrap:wrap;gap:3px;max-height:120px;overflow-y:auto}
+.chip{background:var(--card2);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:10px;font-weight:700;color:var(--muted)}
+.chip.fresh{border-color:var(--gold);color:var(--gold)}
+.players-list{display:flex;flex-wrap:wrap;gap:4px}
+.ppill{display:inline-flex;align-items:center;gap:4px;background:var(--card2);border:1px solid var(--border);border-radius:20px;padding:3px 8px;font-size:11px}
+.pdot{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 4px var(--green)}
+.win-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.win-overlay.show{display:flex;animation:fadeIn .4s ease}
+.win-big{font-family:'Abril Fatface',serif;font-size:clamp(54px,12vw,100px);background:linear-gradient(135deg,var(--gold),var(--pink),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 36px rgba(245,200,66,.5));animation:wglow .6s ease infinite alternate;text-align:center}
+.win-msg{font-size:15px;color:var(--white);letter-spacing:2px;text-transform:uppercase;opacity:.7}
+.win-board{font-size:18px;font-weight:700;color:var(--gold);margin:4px 0 12px}
+@keyframes wglow{from{filter:drop-shadow(0 0 22px rgba(245,200,66,.4))}to{filter:drop-shadow(0 0 50px rgba(255,77,143,.9))}}
+.btn-gold{padding:12px 26px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;background:linear-gradient(135deg,var(--gold2),var(--gold));color:#1a1200;box-shadow:0 4px 18px rgba(245,200,66,.3);transition:all .2s}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 26px rgba(245,200,66,.5)}
+.btn-ghost{padding:10px 20px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;transition:all .2s;margin-top:4px}
+.btn-ghost:hover{border-color:var(--white);color:var(--white)}
+.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(70px);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 18px;font-size:13px;font-weight:600;z-index:300;transition:transform .35s cubic-bezier(.34,1.56,.64,1);white-space:nowrap}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.confetti-p{position:fixed;border-radius:2px;animation:cfall linear forwards;z-index:201}
+@keyframes cfall{0%{transform:translateY(-14px) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+</style>
+</head>
+<body>
+<!-- LOBBY -->
+<div class="screen active" id="lobbyScreen">
+  <div class="logo">BINGO</div>
+  <div class="tagline">Ethbingo &nbsp;·&nbsp; Multiplayer</div>
+  <div class="game-counter-badge" id="lobbyGameNum">Game #1</div>
+  <div class="balance-bar"><span>Balance:</span> <span class="balance-display">$100</span></div>
+  <div class="pick-lbl" id="pickLbl">Choose a number — $10 entry fee</div>
+  <div class="game-gate" id="gameGate">
+    <div class="gate-icon">🎮</div>
+    <div class="gate-title">Game in Progress</div>
+    <div class="gate-sub">Wait for the current game to finish</div>
+  </div>
+  <div class="num-grid" id="numGrid"></div>
+</div>
+<!-- WAITING -->
+<div class="screen" id="waitingScreen">
+  <div class="wait-box">
+    <div class="game-counter-badge" id="waitGameNum" style="margin-bottom:10px;display:inline-block">Game #1</div>
+    <div class="wait-title">You picked</div>
+    <div class="wait-num" id="myPickedNum">–</div>
+    <div class="wait-sub">$10 entry fee paid · Board reserved</div>
+    <div class="pcount"><div class="pdotpulse"></div><span id="waitCount">1 player in lobby</span></div>
+    <div class="ring-wrap" id="ringWrap">
+      <div class="ring-rel">
+        <svg width="86" height="86" viewBox="0 0 100 100">
+          <circle class="ring-bg" cx="50" cy="50" r="45"/>
+          <circle class="ring-arc" id="ringArc" cx="50" cy="50" r="45"/>
+        </svg>
+        <div class="ring-num" id="ringNum">30</div>
+      </div>
+    </div>
+    <div class="wait-hint" id="waitHint">Waiting for another player…</div>
+    <button class="btn-ghost" style="width:100%;margin-top:12px" onclick="leaveGame()">Leave</button>
+  </div>
+</div>
+<!-- GAME -->
+<div class="screen" id="gameScreen">
+  <div class="topbar">
+    <div class="game-logo">BINGO</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div class="game-counter-badge" id="gameScreenNum" style="margin:0;font-size:10px;padding:3px 10px">Game #1</div>
+      <div class="my-badge" id="myBoardBadge">#–</div>
+    </div>
+    <button class="leave-btn" onclick="leaveGame()">Leave</button>
+  </div>
+  <div class="game-wrap">
+    <div>
+      <div class="bingo-header"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
+      <div class="bingo-grid" id="bingoGrid"></div>
+    </div>
+    <div class="sidebar">
+      <div class="panel">
+        <div class="ptitle">Current Ball</div>
+        <div class="caller-ball" id="callerBall">?</div>
+        <div class="cletter" id="callerLetter"></div>
+        <div class="cbig" id="callerBig"></div>
+      </div>
+      <div class="panel">
+        <div class="ptitle">Stats</div>
+        <div class="stat-row"><span class="slbl">Balls Called</span><span class="sval" id="sCalled">0</span></div>
+        <div class="stat-row"><span class="slbl">Remaining</span><span class="sval" id="sRemain">75</span></div>
+        <div class="stat-row"><span class="slbl">Your Marks</span><span class="sval" id="sMarked">1</span></div>
+        <div class="stat-row"><span class="slbl">Players</span><span class="sval" id="sPlayers">–</span></div>
+        <div class="stat-row"><span class="slbl">Balance</span><span class="sval balance-display">$–</span></div>
+      </div>
+      <div class="panel"><div class="ptitle">Called Numbers</div><div class="called-wrap" id="calledWrap"></div></div>
+      <div class="panel"><div class="ptitle">Players</div><div class="players-list" id="playersList"></div></div>
+    </div>
+  </div>
+</div>
+<!-- WIN -->
+<div class="win-overlay" id="winOverlay">
+  <div class="win-big" id="winTitle">BINGO!</div>
+  <div class="win-msg" id="winMsg">You won!</div>
+  <div class="win-board" id="winBoard"></div>
+  <button class="btn-gold" onclick="leaveGame()">Back to Lobby</button>
+</div>
+<div class="toast" id="toast"></div>
+</body>
+</html>
