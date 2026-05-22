@@ -10,7 +10,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, get, onValue, remove, push }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
 const firebaseConfig = {
   apiKey: "AIzaSyBjytgeMiPqurBL5IXxuI8QrWtsxhixb8s",
   authDomain: "bingo-4c196.firebaseapp.com",
@@ -43,13 +42,13 @@ db=getDatabase(app2);
 function r(path){return ref(db,path);}
 async function init(){
   if(tgUser){const res=await fetch(`${SERVER}/api/user`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:tgUser.id,name:tgUser.first_name})});myUser=await res.json();}
-  else{myUser={telegramId:'demo_'+Math.floor(Math.random()*9999),name:'Demo Player',credits:100};}
+  else{myUser={telegramId:'demo_'+Math.floor(Math.random()*9999),name:'Demo Player',balance:0};}
   updateBalanceUI();
   try{const cSnap=await get(r('gameCounter'));const currentCount=cSnap.val()||1;const playersSnap=await get(r('lobby/players'));const now=Date.now();const pData=playersSnap.val()||{};const activePlayers=Object.values(pData).filter(p=>(now-(p.joinedAt||0))<120000);if(activePlayers.length===0){await remove(r('game'));await remove(r('lobby'));await set(r('gameCounter'),currentCount);}}catch(e){}
   onValue(r('gameCounter'),snap=>{gameCounter=snap.val()||1;document.getElementById('lobbyGameNum').textContent='Game #'+gameCounter;document.getElementById('waitGameNum').textContent='Game #'+gameCounter;document.getElementById('gameScreenNum').textContent='Game #'+gameCounter;});
   buildPicker();show('lobbyScreen');
 }
-function updateBalanceUI(){const bal=myUser?.credits??0;document.querySelectorAll('.balance-display').forEach(el=>el.textContent='$'+bal);}
+function updateBalanceUI(){const bal=myUser?.balance??myUser?.credits??0;document.querySelectorAll('.balance-display').forEach(el=>el.textContent=bal+' ETB');}
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
 function letterOf(n){if(n<=15)return'B';if(n<=30)return'I';if(n<=45)return'N';if(n<=60)return'G';return'O';}
@@ -64,7 +63,8 @@ function buildPicker(){
 }
 async function pickNumber(n){
   if(!myUser)return;
-  if(myUser.credits<10){toast('Not enough credits! Need $10 to play.');return;}
+  const bal=myUser.balance??myUser.credits??0;
+  if(bal<10){toast('Not enough ETB! Deposit first. Need 10 ETB.');return;}
   const gameSnap=await get(r('game/started'));
   if(gameSnap.val()===true){toast('Game in progress! Wait for next game.');return;}
   const el=document.getElementById('nb'+n);if(!el||el.classList.contains('taken'))return;
@@ -74,7 +74,7 @@ async function pickNumber(n){
     const joinRes=await fetch(`${SERVER}/api/join`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser.telegramId})});
     const joinData=await joinRes.json();
     if(!joinRes.ok){toast(joinData.error||'Failed to join');return;}
-    myUser.credits=joinData.newBalance;updateBalanceUI();
+    myUser.balance=joinData.newBalance;updateBalanceUI();
     if(myNumber&&myNumber!==n){await remove(r('lobby/taken/'+myNumber));await remove(r('lobby/players/'+myNumber));}
     myNumber=n;
     await set(r('lobby/taken/'+n),n);
@@ -128,9 +128,9 @@ async function checkWin(){if(gameOver||winnerAlreadySet)return;for(const line of
 async function showWinner(w){
   if(gameOver)return;gameOver=true;stopBallCaller();stopMusic();
   const isMe=w.boardNum===myNumber;let winnings=0;
-  if(isMe){playWinSound();try{const res=await fetch(`${SERVER}/api/payout`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser?.telegramId})});const data=await res.json();if(data.winnings&&data.winnings>0){winnings=data.winnings;myUser.credits=data.newBalance;updateBalanceUI();}}catch(e){}}
+  if(isMe){playWinSound();try{const res=await fetch(`${SERVER}/api/payout`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser?.telegramId})});const data=await res.json();if(data.winnings&&data.winnings>0){winnings=data.winnings;myUser.balance=data.newBalance;updateBalanceUI();}}catch(e){}}
   document.getElementById('winTitle').textContent=isMe?'🎉 BINGO!':'GAME OVER';
-  document.getElementById('winMsg').textContent=isMe?`You won $${winnings} credits!`:'Better luck next time';
+  document.getElementById('winMsg').textContent=isMe?`You won ${winnings} ETB!`:'Better luck next time';
   document.getElementById('winBoard').textContent='Board #'+w.boardNum+' wins!';
   let secs=3;document.getElementById('returnCountdown').textContent=secs;
   document.getElementById('winOverlay').classList.add('show');
@@ -158,12 +158,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .screen{display:none;position:relative;z-index:1;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:16px 12px 24px}
 .screen.active{display:flex}
 #gameScreen.active{justify-content:flex-start;padding:10px 10px 8px;overflow:hidden;height:100vh}
-.logo{font-family:'Abril Fatface',serif;font-size:clamp(44px,10vw,80px);letter-spacing:8px;background:linear-gradient(135deg,var(--gold) 0%,var(--pink) 50%,var(--cyan) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 36px rgba(245,200,66,.35));line-height:1}
-.tagline{font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.logo{font-family:'Abril Fatface',serif;font-size:clamp(64px,16vw,110px);letter-spacing:10px;background:linear-gradient(135deg,var(--gold) 0%,var(--pink) 50%,var(--cyan) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 40px rgba(245,200,66,.4));line-height:1;margin-bottom:16px}
+.lobby-info-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;justify-content:center}
+.info-pill{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:7px 16px;font-size:12px;font-weight:700;color:var(--white);letter-spacing:.5px}
+.info-pill:first-child{color:var(--gold);border-color:rgba(245,200,66,.3);background:linear-gradient(135deg,rgba(245,200,66,.12),rgba(255,77,143,.08))}
 .game-counter-badge{background:linear-gradient(135deg,rgba(245,200,66,.15),rgba(255,77,143,.15));border:1px solid rgba(245,200,66,.3);border-radius:20px;padding:4px 14px;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-top:6px}
-.balance-bar{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:6px 14px;margin-top:10px;font-size:13px;font-weight:700}
-.balance-bar span{color:var(--muted);font-size:11px;font-weight:400}
-.pick-lbl{margin:14px 0 8px;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted)}
 .game-gate{display:none;flex-direction:column;align-items:center;gap:6px;background:rgba(255,77,143,.08);border:1px solid rgba(255,77,143,.3);border-radius:14px;padding:16px 24px;max-width:360px;width:100%;text-align:center;margin:10px 0}
 .gate-icon{font-size:28px}.gate-title{font-family:'Abril Fatface',serif;font-size:20px;color:var(--pink)}.gate-sub{font-size:12px;color:var(--muted)}
 .num-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;width:100%;max-width:520px}
@@ -241,10 +240,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 <body>
 <div class="screen active" id="lobbyScreen">
   <div class="logo">BINGO</div>
-  <div class="tagline">Ethbingo &nbsp;·&nbsp; Multiplayer</div>
-  <div class="game-counter-badge" id="lobbyGameNum">Game #1</div>
-  <div class="balance-bar"><span>Balance:</span><span class="balance-display">$100</span></div>
-  <div class="pick-lbl">Choose a number — $10 entry fee</div>
+  <div class="lobby-info-bar">
+    <div class="info-pill" id="lobbyGameNum">Game #1</div>
+    <div class="info-pill">⚡ <span class="balance-display">0 ETB</span></div>
+    <div class="info-pill">🎯 10 ETB</div>
+  </div>
   <div class="game-gate" id="gameGate"><div class="gate-icon">🎮</div><div class="gate-title">Game in Progress</div><div class="gate-sub">Wait for the current game to finish</div></div>
   <div class="num-grid" id="numGrid"></div>
 </div>
@@ -253,7 +253,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
     <div class="game-counter-badge" id="waitGameNum" style="margin-bottom:8px;display:inline-block">Game #1</div>
     <div class="wait-title">You picked</div>
     <div class="wait-num" id="myPickedNum">–</div>
-    <div class="wait-sub">$10 entry fee paid · Board reserved</div>
+    <div class="wait-sub">10 ETB entry fee paid · Board reserved</div>
     <div class="pcount"><div class="pdotpulse"></div><span id="waitCount">1 player in lobby</span></div>
     <div class="ring-wrap" id="ringWrap"><div class="ring-rel"><svg width="80" height="80" viewBox="0 0 100 100"><circle class="ring-bg" cx="50" cy="50" r="45"/><circle class="ring-arc" id="ringArc" cx="50" cy="50" r="45"/></svg><div class="ring-num" id="ringNum">30</div></div></div>
     <div class="wait-hint" id="waitHint">Waiting for another player…</div>
@@ -274,7 +274,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
     <div class="stat-item"><span class="slbl">Left</span><span class="sval" id="sRemain">75</span></div>
     <div class="stat-item"><span class="slbl">Marks</span><span class="sval" id="sMarked">1</span></div>
     <div class="stat-item"><span class="slbl">Players</span><span class="sval" id="sPlayers">–</span></div>
-    <div class="stat-item"><span class="slbl">Balance</span><span class="sval balance-display">$–</span></div>
+    <div class="stat-item"><span class="slbl">Balance</span><span class="sval balance-display">0 ETB</span></div>
   </div>
   <div class="called-bar" id="calledWrap"></div>
   <div style="width:100%">
@@ -286,7 +286,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
       <div class="caller-ball" id="callerBall">?</div>
       <div class="caller-info"><div class="cletter" id="callerLetter">–</div><div class="cbig" id="callerBig">–</div></div>
     </div>
-    <div class="balance-compact"><span>Balance</span><span class="balance-display" style="font-size:14px;font-weight:700">$–</span></div>
+    <div class="balance-compact"><span>Balance</span><span class="balance-display" style="font-size:14px;font-weight:700">0 ETB</span></div>
   </div>
 </div>
 <div class="win-overlay" id="winOverlay">
@@ -298,4 +298,4 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 </div>
 <div class="toast" id="toast"></div>
 </body>
-  </html>
+</html>
