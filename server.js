@@ -21,11 +21,18 @@ admin.initializeApp({
 });
 const db = admin.database();
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_TOKEN    = process.env.BOT_TOKEN;
 const MINI_APP_URL = process.env.MINI_APP_URL;
-const ENTRY_FEE = 10;
-const WINNER_CUT = 0.9;
-const STARTING_CREDITS = 100;
+const ENTRY_FEE    = 10;
+const WINNER_CUT   = 0.80;
+const MIN_DEPOSIT  = 50;
+const ADMIN_ID     = 5733202009;
+
+const BANKS = {
+  cbe:       { name: 'CBE Bank',           emoji: '🏦', account: '1000605418159', holder: 'Dawit Mamo' },
+  telebirr:  { name: 'Telebirr',           emoji: '📱', account: '0980462375',    holder: 'Dawit Mamo' },
+  abyssinia: { name: 'Bank of Abyssinia',  emoji: '🏛️', account: '206543108',     holder: 'Dawit Mamo' }
+};
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -35,31 +42,129 @@ bot.onText(/\/start/, async (msg) => {
   const userRef = db.ref(`users/${userId}`);
   const snap = await userRef.once('value');
   if (!snap.exists()) {
-    await userRef.set({ telegramId: userId, name: firstName, credits: STARTING_CREDITS, gamesPlayed: 0, gamesWon: 0, joinedAt: Date.now() });
+    await userRef.set({ telegramId: userId, name: firstName, username: msg.from.username||'', balance: 0, gamesPlayed: 0, gamesWon: 0, totalDeposited: 0, totalWon: 0, joinedAt: Date.now() });
   }
-  const userData = (await userRef.once('value')).val();
+  const user = (await userRef.once('value')).val();
   await bot.sendMessage(userId,
-    `🎰 *Welcome to Ethbingo, ${firstName}!*\n\n💰 Balance: *$${userData.credits} demo credits*\n🎮 Entry fee: *$${ENTRY_FEE} per game*\n🏆 Winner takes: *${WINNER_CUT * 100}% of the pot*\n\nTap below to play!`,
-    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Bingo', web_app: { url: MINI_APP_URL } }],[{ text: '💰 My Balance', callback_data: 'balance' },{ text: '🏆 Leaderboard', callback_data: 'leaderboard' }]] } }
+    `🎰 *Welcome to Ethbingo, ${firstName}!*\n\n💰 Balance: *${user.balance} ETB*\n🎮 Entry fee: *${ENTRY_FEE} ETB per game*\n🏆 Winner takes: *${WINNER_CUT*100}% of the pot*\n\nDeposit ETB to start playing!`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [
+      [{ text: '🎯 Play Bingo', web_app: { url: MINI_APP_URL } }],
+      [{ text: '💰 Deposit ETB', callback_data: 'deposit' }, { text: '💳 My Balance', callback_data: 'balance' }],
+      [{ text: '🏆 Leaderboard', callback_data: 'leaderboard' }, { text: '📋 Instructions', callback_data: 'instructions' }]
+    ]}}
   );
 });
 
 bot.on('callback_query', async (query) => {
   const userId = query.from.id;
-  if (query.data === 'balance') {
+  const data = query.data;
+  await bot.answerCallbackQuery(query.id);
+
+  if (data === 'balance') {
     const snap = await db.ref(`users/${userId}`).once('value');
     const user = snap.val();
-    if (!user) { bot.answerCallbackQuery(query.id, { text: 'Send /start first' }); return; }
-    bot.answerCallbackQuery(query.id);
-    bot.sendMessage(userId, `💰 *Balance*\n\nCredits: *$${user.credits}*\nGames Played: *${user.gamesPlayed||0}*\nGames Won: *${user.gamesWon||0}*`, { parse_mode: 'Markdown' });
+    if (!user) { bot.sendMessage(userId, 'Please send /start first.'); return; }
+    bot.sendMessage(userId, `💳 *Your Account*\n\nBalance: *${user.balance} ETB*\nGames Played: *${user.gamesPlayed||0}*\nGames Won: *${user.gamesWon||0}*\nTotal Deposited: *${user.totalDeposited||0} ETB*\nTotal Won: *${user.totalWon||0} ETB*`, { parse_mode: 'Markdown' });
   }
-  if (query.data === 'leaderboard') {
-    bot.answerCallbackQuery(query.id);
-    const snap = await db.ref('users').orderByChild('credits').limitToLast(10).once('value');
-    const sorted = Object.values(snap.val()||{}).sort((a,b)=>b.credits-a.credits);
-    let msg = '🏆 *Top Players*\n\n';
-    sorted.forEach((u,i) => { msg += `${['🥇','🥈','🥉'][i]||i+1+'.'} ${u.name} — *$${u.credits}*\n`; });
+
+  if (data === 'deposit') {
+    bot.sendMessage(userId, `💰 *Make a Deposit*\n\nMinimum: *${MIN_DEPOSIT} ETB*\n\nChoose your bank:`, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [
+        [{ text: '🏦 CBE Bank', callback_data: 'bank_cbe' }],
+        [{ text: '📱 Telebirr', callback_data: 'bank_telebirr' }],
+        [{ text: '🏛️ Bank of Abyssinia', callback_data: 'bank_abyssinia' }]
+      ]}
+    });
+  }
+
+  if (data.startsWith('bank_')) {
+    const bankKey = data.replace('bank_', '');
+    const bank = BANKS[bankKey];
+    if (!bank) return;
+    await db.ref(`pendingDeposit/${userId}`).set({ bankKey, step: 'awaiting_amount', ts: Date.now() });
+    bot.sendMessage(userId,
+      `${bank.emoji} *${bank.name}*\n\nAccount: \`${bank.account}\`\nName: *${bank.holder}*\n\n1️⃣ Send at least *${MIN_DEPOSIT} ETB* to the account above\n2️⃣ Reply with the amount you sent (numbers only)\n\nExample: \`100\``,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (data === 'leaderboard') {
+    const snap = await db.ref('users').orderByChild('totalWon').limitToLast(10).once('value');
+    const sorted = Object.values(snap.val()||{}).sort((a,b)=>(b.totalWon||0)-(a.totalWon||0));
+    let msg = '🏆 *Top Winners*\n\n';
+    ['🥇','🥈','🥉'].forEach((m,i) => { if(sorted[i]) msg += `${m} ${sorted[i].name} — *${sorted[i].totalWon||0} ETB*\n`; });
+    sorted.slice(3,10).forEach((u,i) => { msg += `${i+4}. ${u.name} — *${u.totalWon||0} ETB*\n`; });
     bot.sendMessage(userId, msg, { parse_mode: 'Markdown' });
+  }
+
+  if (data === 'instructions') {
+    bot.sendMessage(userId,
+      `📋 *How to Play Ethbingo*\n\n1️⃣ Deposit ETB to your account\n2️⃣ Tap "Play Bingo" to open the game\n3️⃣ Pick a number 1-100 (costs ${ENTRY_FEE} ETB)\n4️⃣ Wait for another player\n5️⃣ Balls called every 2 seconds\n6️⃣ First to complete a line wins ${WINNER_CUT*100}% of the pot!`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (data.startsWith('approve_')) {
+    if (userId !== ADMIN_ID) return;
+    const parts = data.split('_');
+    const targetUserId = parts[1];
+    const amount = parseInt(parts[2]);
+    const depositId = parts[3];
+    const userRef = db.ref(`users/${targetUserId}`);
+    const user = (await userRef.once('value')).val();
+    if (!user) return;
+    const newBalance = (user.balance||0) + amount;
+    await userRef.update({ balance: newBalance, totalDeposited: (user.totalDeposited||0)+amount });
+    await db.ref(`deposits/${depositId}`).update({ status: 'approved', approvedAt: Date.now() });
+    bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id });
+    bot.sendMessage(ADMIN_ID, `✅ Approved ${amount} ETB for ${user.name}`);
+    bot.sendMessage(parseInt(targetUserId),
+      `✅ *Deposit Approved!*\n\nAmount: *${amount} ETB*\nNew Balance: *${newBalance} ETB*\n\nTap below to play!`,
+      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Now', web_app: { url: MINI_APP_URL } }]] }}
+    );
+  }
+
+  if (data.startsWith('reject_')) {
+    if (userId !== ADMIN_ID) return;
+    const parts = data.split('_');
+    const targetUserId = parts[1];
+    const depositId = parts[2];
+    await db.ref(`deposits/${depositId}`).update({ status: 'rejected', rejectedAt: Date.now() });
+    bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id });
+    bot.sendMessage(ADMIN_ID, `❌ Deposit rejected.`);
+    bot.sendMessage(parseInt(targetUserId), `❌ *Deposit Rejected*\n\nYour deposit could not be verified. Contact support if you believe this is an error.`, { parse_mode: 'Markdown' });
+  }
+});
+
+bot.on('message', async (msg) => {
+  if (msg.text?.startsWith('/')) return;
+  const userId = msg.from.id;
+  const text = msg.text?.trim();
+  if (!text) return;
+  const pendingSnap = await db.ref(`pendingDeposit/${userId}`).once('value');
+  const pending = pendingSnap.val();
+  if (!pending) return;
+
+  if (pending.step === 'awaiting_amount') {
+    const amount = parseInt(text);
+    if (isNaN(amount) || amount < MIN_DEPOSIT) { bot.sendMessage(userId, `❌ Minimum is ${MIN_DEPOSIT} ETB. Enter a valid amount.`); return; }
+    await db.ref(`pendingDeposit/${userId}`).update({ step: 'awaiting_txn', amount });
+    bot.sendMessage(userId, `✅ Amount: *${amount} ETB*\n\nNow send your *transaction reference* or SMS confirmation.\n\nExample: \`FT25160PLPSH88713517\``, { parse_mode: 'Markdown' });
+    return;
+  }
+
+  if (pending.step === 'awaiting_txn') {
+    const bank = BANKS[pending.bankKey];
+    const user = (await db.ref(`users/${userId}`).once('value')).val();
+    const depositId = `dep_${userId}_${Date.now()}`;
+    await db.ref(`deposits/${depositId}`).set({ depositId, userId, userName: user?.name||msg.from.first_name, bankKey: pending.bankKey, bankName: bank.name, amount: pending.amount, txnRef: text, status: 'pending', submittedAt: Date.now() });
+    await db.ref(`pendingDeposit/${userId}`).remove();
+    bot.sendMessage(userId, `📤 *Deposit Submitted!*\n\nBank: *${bank.name}*\nAmount: *${pending.amount} ETB*\nReference: \`${text}\`\n\n⏳ Will be verified within 5-15 minutes.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(ADMIN_ID,
+      `💰 *New Deposit Request*\n\n👤 Player: *${user?.name||msg.from.first_name}* (@${msg.from.username||'no username'})\n🏦 Bank: *${bank.name}*\n💵 Amount: *${pending.amount} ETB*\n🔖 Reference: \`${text}\`\n🆔 User ID: \`${userId}\``,
+      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: `approve_${userId}_${pending.amount}_${depositId}` }, { text: '❌ Reject', callback_data: `reject_${userId}_${depositId}` }]] }}
+    );
   }
 });
 
@@ -68,7 +173,7 @@ app.post('/api/user', async (req, res) => {
   if (!telegramId) return res.status(400).json({ error: 'No telegramId' });
   const userRef = db.ref(`users/${telegramId}`);
   const snap = await userRef.once('value');
-  if (!snap.exists()) await userRef.set({ telegramId, name: name||'Player', credits: STARTING_CREDITS, gamesPlayed: 0, gamesWon: 0, joinedAt: Date.now() });
+  if (!snap.exists()) await userRef.set({ telegramId, name: name||'Player', balance: 0, gamesPlayed: 0, gamesWon: 0, totalDeposited: 0, totalWon: 0, joinedAt: Date.now() });
   res.json((await userRef.once('value')).val());
 });
 
@@ -77,11 +182,11 @@ app.post('/api/join', async (req, res) => {
   const userRef = db.ref(`users/${telegramId}`);
   const user = (await userRef.once('value')).val();
   if (!user) return res.status(404).json({ error: 'User not found' });
-  if (user.credits < ENTRY_FEE) return res.status(400).json({ error: 'Not enough credits' });
-  await userRef.update({ credits: user.credits - ENTRY_FEE, gamesPlayed: (user.gamesPlayed||0)+1 });
+  if ((user.balance||0) < ENTRY_FEE) return res.status(400).json({ error: `Not enough ETB! Need ${ENTRY_FEE} ETB. Deposit first.` });
+  await userRef.update({ balance: user.balance - ENTRY_FEE, gamesPlayed: (user.gamesPlayed||0)+1 });
   const potSnap = await db.ref('game/pot').once('value');
   await db.ref('game/pot').set((potSnap.val()||0) + ENTRY_FEE);
-  res.json({ success: true, newBalance: user.credits - ENTRY_FEE });
+  res.json({ success: true, newBalance: user.balance - ENTRY_FEE });
 });
 
 app.post('/api/payout', async (req, res) => {
@@ -93,16 +198,17 @@ app.post('/api/payout', async (req, res) => {
   const userRef = db.ref(`users/${telegramId}`);
   const user = (await userRef.once('value')).val();
   if (!user) return res.status(404).json({ error: 'User not found' });
-  await userRef.update({ credits: user.credits + winnings, gamesWon: (user.gamesWon||0)+1 });
+  const newBalance = (user.balance||0) + winnings;
+  await userRef.update({ balance: newBalance, gamesWon: (user.gamesWon||0)+1, totalWon: (user.totalWon||0)+winnings });
   await db.ref('game/paidOut').set(true);
-  bot.sendMessage(telegramId, `🎉 *BINGO! You won $${winnings}!*\n\nNew balance: *$${user.credits+winnings}*`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Again', web_app: { url: MINI_APP_URL } }]] } });
-  res.json({ success: true, winnings, newBalance: user.credits + winnings });
+  bot.sendMessage(parseInt(telegramId), `🎉 *BINGO! You Won!*\n\n💰 Winnings: *${winnings} ETB*\n💳 New Balance: *${newBalance} ETB*`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Again', web_app: { url: MINI_APP_URL } }]] }});
+  res.json({ success: true, winnings, newBalance });
 });
 
 app.get('/api/balance/:telegramId', async (req, res) => {
   const snap = await db.ref(`users/${req.params.telegramId}`).once('value');
-  if (!snap.exists()) return res.status(404).json({ error: 'User not found' });
-  res.json({ credits: snap.val().credits, name: snap.val().name });
+  if (!snap.exists()) return res.status(404).json({ error: 'Not found' });
+  res.json({ balance: snap.val().balance, name: snap.val().name });
 });
 
 app.listen(process.env.PORT || 3000, () => console.log('🎰 Ethbingo running!'));
