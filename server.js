@@ -34,30 +34,35 @@ const BANKS = {
   abyssinia: { name: 'Bank of Abyssinia', emoji: '🏛️', account: '206543108',     holder: 'Dawit Mamo' }
 };
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-console.log('Bot started. Admin ID:', ADMIN_ID, 'Mini App URL:', MINI_APP_URL);
+// FIX: Clean polling start — stops conflicts
+const bot = new TelegramBot(BOT_TOKEN, { polling: { autoStart: false, params: { timeout: 10 } } });
+
+bot.stopPolling().then(() => {
+  return new Promise(resolve => setTimeout(resolve, 2000));
+}).then(() => {
+  return bot.startPolling();
+}).then(() => {
+  console.log('Bot polling started. Admin ID:', ADMIN_ID);
+}).catch(err => {
+  console.error('Polling error:', err.message);
+  setTimeout(() => bot.startPolling(), 5000);
+});
 
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id;
   const firstName = msg.from.first_name || 'Player';
   const userRef = db.ref(`users/${userId}`);
   const snap = await userRef.once('value');
-
   if (!snap.exists()) {
     await userRef.set({
-      telegramId: userId,
-      name: firstName,
+      telegramId: userId, name: firstName,
       username: msg.from.username || '',
-      balance: 0,
-      inviteBonus: 0,
-      gamesPlayed: 0,
-      gamesWon: 0,
-      totalDeposited: 0,
-      totalWon: 0,
+      balance: 0, inviteBonus: 0,
+      gamesPlayed: 0, gamesWon: 0,
+      totalDeposited: 0, totalWon: 0,
       joinedAt: Date.now()
     });
   }
-
   const startParam = msg.text?.split(' ')[1];
   if (startParam && startParam.startsWith('ref_') && !snap.exists()) {
     const referrerId = startParam.replace('ref_', '');
@@ -65,17 +70,12 @@ bot.onText(/\/start/, async (msg) => {
       const refRef = db.ref(`users/${referrerId}`);
       const refSnap = await refRef.once('value');
       if (refSnap.exists()) {
-        const refUser = refSnap.val();
-        const newBonus = (refUser.inviteBonus || 0) + 2;
+        const newBonus = (refSnap.val().inviteBonus || 0) + 2;
         await refRef.update({ inviteBonus: newBonus });
-        bot.sendMessage(parseInt(referrerId),
-          `🎉 *Someone joined using your invite link!*\n\n+2 ETB invite bonus added!\nTotal invite bonus: *${newBonus} ETB*\n\n_(Separate from real balance)_`,
-          { parse_mode: 'Markdown' }
-        );
+        try { bot.sendMessage(parseInt(referrerId), `Someone joined with your invite! +2 ETB bonus. Total invite bonus: ${newBonus} ETB`); } catch(e) {}
       }
     }
   }
-
   const user = (await userRef.once('value')).val();
   await bot.sendMessage(userId,
     `🎰 *Welcome to Ethbingo, ${firstName}!*\n\n💰 Balance: *${user.balance} ETB*\n🎮 Entry fee: *${ENTRY_FEE} ETB per game*\n🏆 Winner takes: *${WINNER_CUT * 100}% of the pot*\n\nDeposit ETB to start playing!`,
@@ -120,7 +120,7 @@ bot.on('callback_query', async (query) => {
     if (!bank) return;
     await db.ref(`pendingDeposit/${userId}`).set({ bankKey, step: 'awaiting_amount', ts: Date.now() });
     bot.sendMessage(userId,
-      `${bank.emoji} *${bank.name}*\n\nAccount: \`${bank.account}\`\nName: *${bank.holder}*\n\n1️⃣ Send at least *${MIN_DEPOSIT} ETB* to the account above\n2️⃣ Reply with the amount you sent\n\nExample: \`100\``,
+      `${bank.emoji} *${bank.name}*\n\nAccount: \`${bank.account}\`\nName: *${bank.holder}*\n\n1. Send at least *${MIN_DEPOSIT} ETB* to the account above\n2. Reply with the amount you sent\n\nExample: 100`,
       { parse_mode: 'Markdown' }
     );
   }
@@ -130,9 +130,9 @@ bot.on('callback_query', async (query) => {
     const snap = await db.ref(`users/${userId}`).once('value');
     const invBonus = snap.val()?.inviteBonus || 0;
     bot.sendMessage(userId,
-      `👥 *Invite Friends & Earn!*\n\nFor every friend who joins, you get *+2 ETB invite bonus!*\n\nYour invite bonus: *${invBonus} ETB*\n_(Separate from real balance)_\n\n🔗 Your link:\n\`${inviteLink}\``,
+      `👥 *Invite Friends and Earn!*\n\nFor every friend who joins you get +2 ETB bonus!\n\nYour bonus so far: *${invBonus} ETB*\n\nYour link:\n${inviteLink}`,
       { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[
-        { text: '📤 Share Link', url: `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join me on Ethbingo and win ETB! 🎰')}` }
+        { text: '📤 Share Link', url: `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join me on Ethbingo and win ETB!')}` }
       ]]}}
     );
   }
@@ -141,16 +141,14 @@ bot.on('callback_query', async (query) => {
     const snap = await db.ref('users').orderByChild('totalWon').limitToLast(10).once('value');
     const sorted = Object.values(snap.val() || {}).sort((a, b) => (b.totalWon || 0) - (a.totalWon || 0));
     let msg = '🏆 *Top Winners*\n\n';
-    const medals = ['🥇', '🥈', '🥉'];
-    sorted.slice(0, 10).forEach((u, i) => {
-      msg += `${medals[i] || `${i + 1}.`} ${u.name} — *${u.totalWon || 0} ETB*\n`;
-    });
+    ['🥇','🥈','🥉'].forEach((m, i) => { if (sorted[i]) msg += `${m} ${sorted[i].name} - ${sorted[i].totalWon || 0} ETB\n`; });
+    sorted.slice(3, 10).forEach((u, i) => { msg += `${i + 4}. ${u.name} - ${u.totalWon || 0} ETB\n`; });
     bot.sendMessage(userId, msg, { parse_mode: 'Markdown' });
   }
 
   if (data === 'instructions') {
     bot.sendMessage(userId,
-      `📋 *How to Play Ethbingo*\n\n1️⃣ Deposit ETB to your account\n2️⃣ Tap "Play Bingo"\n3️⃣ Pick a number 1-100 (costs ${ENTRY_FEE} ETB)\n4️⃣ Wait for another player (30s countdown)\n5️⃣ Balls called every 1.8 seconds\n6️⃣ First to complete a line wins ${WINNER_CUT * 100}% of the pot!\n\n💡 *Derash* = how much the winner takes`,
+      `📋 *How to Play Ethbingo*\n\n1. Deposit ETB to your account\n2. Tap Play Bingo\n3. Pick a number 1-100 (costs ${ENTRY_FEE} ETB)\n4. Wait for another player\n5. Balls called every 1.8 seconds\n6. First to complete a line wins ${WINNER_CUT * 100}% of the pot!\n\nDerash = how much the winner takes`,
       { parse_mode: 'Markdown' }
     );
   }
@@ -167,8 +165,8 @@ bot.on('callback_query', async (query) => {
     const newBalance = (user.balance || 0) + amount;
     await userRef.update({ balance: newBalance, totalDeposited: (user.totalDeposited || 0) + amount });
     await db.ref(`deposits/${depositId}`).update({ status: 'approved', approvedAt: Date.now() });
-    bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id });
-    bot.sendMessage(ADMIN_ID, `✅ Approved ${amount} ETB for ${user.name}`);
+    try { bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id }); } catch(e) {}
+    bot.sendMessage(ADMIN_ID, `Approved ${amount} ETB for ${user.name}. New balance: ${newBalance} ETB`);
     bot.sendMessage(parseInt(targetUserId),
       `✅ *Deposit Approved!*\n\nAmount: *${amount} ETB*\nNew Balance: *${newBalance} ETB*\n\nTap below to play!`,
       { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Now', web_app: { url: MINI_APP_URL } }]] }}
@@ -181,12 +179,9 @@ bot.on('callback_query', async (query) => {
     const targetUserId = parts[1];
     const depositId = parts[2];
     await db.ref(`deposits/${depositId}`).update({ status: 'rejected', rejectedAt: Date.now() });
-    bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id });
-    bot.sendMessage(ADMIN_ID, `❌ Deposit rejected.`);
-    bot.sendMessage(parseInt(targetUserId),
-      `❌ *Deposit Rejected*\n\nYour deposit could not be verified. Contact support if you believe this is an error.`,
-      { parse_mode: 'Markdown' }
-    );
+    try { bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: ADMIN_ID, message_id: query.message.message_id }); } catch(e) {}
+    bot.sendMessage(ADMIN_ID, `Deposit rejected.`);
+    bot.sendMessage(parseInt(targetUserId), `Your deposit was rejected. Contact support if you believe this is an error.`);
   }
 });
 
@@ -202,14 +197,11 @@ bot.on('message', async (msg) => {
   if (pending.step === 'awaiting_amount') {
     const amount = parseInt(text);
     if (isNaN(amount) || amount < MIN_DEPOSIT) {
-      bot.sendMessage(userId, `❌ Minimum is ${MIN_DEPOSIT} ETB. Enter a valid amount.`);
+      bot.sendMessage(userId, `Minimum is ${MIN_DEPOSIT} ETB. Please enter a valid amount.`);
       return;
     }
     await db.ref(`pendingDeposit/${userId}`).update({ step: 'awaiting_txn', amount });
-    bot.sendMessage(userId,
-      `✅ Amount: *${amount} ETB*\n\nNow send your *transaction reference* or SMS confirmation.\n\nExample: \`FT25160PLPSH88713517\``,
-      { parse_mode: 'Markdown' }
-    );
+    bot.sendMessage(userId, `Amount: ${amount} ETB confirmed.\n\nNow send your transaction reference number or SMS confirmation.\n\nExample: FT25160PLPSH88713517`);
     return;
   }
 
@@ -220,32 +212,21 @@ bot.on('message', async (msg) => {
     await db.ref(`deposits/${depositId}`).set({
       depositId, userId,
       userName: user?.name || msg.from.first_name,
-      bankKey: pending.bankKey,
-      bankName: bank.name,
-      amount: pending.amount,
-      txnRef: text,
-      status: 'pending',
-      submittedAt: Date.now()
+      bankKey: pending.bankKey, bankName: bank.name,
+      amount: pending.amount, txnRef: text,
+      status: 'pending', submittedAt: Date.now()
     });
     await db.ref(`pendingDeposit/${userId}`).remove();
-    bot.sendMessage(userId,
-      `📤 *Deposit Submitted!*\n\nBank: *${bank.name}*\nAmount: *${pending.amount} ETB*\nReference: \`${text}\`\n\n⏳ Will be verified within 5-15 minutes.`,
-      { parse_mode: 'Markdown' }
-    );
+    bot.sendMessage(userId, `Deposit submitted!\n\nBank: ${bank.name}\nAmount: ${pending.amount} ETB\nReference: ${text}\n\nWill be verified within 5-15 minutes.`);
     try {
       await bot.sendMessage(ADMIN_ID,
-        `💰 *New Deposit*\n\n` +
-        `👤 ${user?.name || msg.from.first_name} (@${msg.from.username || 'no username'})\n` +
-        `🏦 ${bank.name}\n` +
-        `💵 ${pending.amount} ETB\n` +
-        `🔖 ${text}\n` +
-        `🆔 ${userId}`,
-        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[
-          { text: '✅ Approve', callback_data: `approve_${userId}_${pending.amount}_${depositId}` },
-          { text: '❌ Reject', callback_data: `reject_${userId}_${depositId}` }
+        `NEW DEPOSIT\n\nPlayer: ${user?.name || msg.from.first_name} (@${msg.from.username || 'none'})\nBank: ${bank.name}\nAmount: ${pending.amount} ETB\nRef: ${text}\nUserID: ${userId}`,
+        { reply_markup: { inline_keyboard: [[
+          { text: 'Approve ' + pending.amount + ' ETB', callback_data: 'approve_' + userId + '_' + pending.amount + '_' + depositId },
+          { text: 'Reject', callback_data: 'reject_' + userId + '_' + depositId }
         ]]}}
       );
-      console.log('Admin notified. Deposit from userId:', userId, 'amount:', pending.amount);
+      console.log('Admin notified. userId:', userId, 'amount:', pending.amount);
     } catch(err) {
       console.error('Admin notify failed:', err.message);
     }
@@ -258,7 +239,7 @@ app.post('/api/user', async (req, res) => {
   const userRef = db.ref(`users/${telegramId}`);
   const snap = await userRef.once('value');
   if (!snap.exists()) {
-    await userRef.set({ telegramId, name: name||'Player', username: username||'', balance: 0, inviteBonus: 0, gamesPlayed: 0, gamesWon: 0, totalDeposited: 0, totalWon: 0, joinedAt: Date.now() });
+    await userRef.set({ telegramId, name: name || 'Player', username: username || '', balance: 0, inviteBonus: 0, gamesPlayed: 0, gamesWon: 0, totalDeposited: 0, totalWon: 0, joinedAt: Date.now() });
   }
   res.json((await userRef.once('value')).val());
 });
@@ -290,10 +271,7 @@ app.post('/api/refund', async (req, res) => {
   const newBalance = (user.balance || 0) + ENTRY_FEE;
   await userRef.update({ balance: newBalance, gamesPlayed: Math.max(0, (user.gamesPlayed || 1) - 1) });
   await db.ref('game/pot').set(Math.max(0, pot - ENTRY_FEE));
-  bot.sendMessage(parseInt(telegramId),
-    `↩️ *10 ETB Refunded*\n\nThe game didn't start. Your entry fee has been returned.\n\nNew balance: *${newBalance} ETB*`,
-    { parse_mode: 'Markdown' }
-  );
+  try { bot.sendMessage(parseInt(telegramId), `10 ETB refunded. New balance: ${newBalance} ETB`); } catch(e) {}
   res.json({ success: true, newBalance });
 });
 
@@ -304,11 +282,10 @@ app.post('/api/payout', async (req, res) => {
   let pot = (await db.ref('game/pot').once('value')).val() || 0;
   if (!pot) pot = (await db.ref('game').once('value')).val()?.pot || 0;
   if (!pot) {
-    const playersSnap = await db.ref('lobby/players').once('value');
-    const playerCount = playersSnap.val() ? Object.keys(playersSnap.val()).length : 0;
-    pot = playerCount * ENTRY_FEE;
+    const ps = await db.ref('lobby/players').once('value');
+    pot = (ps.val() ? Object.keys(ps.val()).length : 0) * ENTRY_FEE;
   }
-  console.log('Payout triggered. Pot:', pot, 'TelegramId:', telegramId);
+  console.log('Payout. Pot:', pot, 'TelegramId:', telegramId);
   const winnings = Math.floor(pot * WINNER_CUT);
   const userRef = db.ref(`users/${telegramId}`);
   const user = (await userRef.once('value')).val();
@@ -316,10 +293,12 @@ app.post('/api/payout', async (req, res) => {
   const newBalance = (user.balance || 0) + winnings;
   await userRef.update({ balance: newBalance, gamesWon: (user.gamesWon || 0) + 1, totalWon: (user.totalWon || 0) + winnings });
   await db.ref('game/paidOut').set(true);
-  bot.sendMessage(parseInt(telegramId),
-    `🎉 *BINGO! You Won!*\n\n🏆 Winnings: *${winnings} ETB* (80% of ${pot} ETB pot)\n💳 New Balance: *${newBalance} ETB*\n\n🎊 Congratulations!`,
-    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Again', web_app: { url: MINI_APP_URL } }]] }}
-  );
+  try {
+    bot.sendMessage(parseInt(telegramId),
+      `🎉 *BINGO! You Won!*\n\n🏆 Winnings: *${winnings} ETB* (80% of ${pot} ETB pot)\n💳 New Balance: *${newBalance} ETB*\n\n🎊 Congratulations!`,
+      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🎯 Play Again', web_app: { url: MINI_APP_URL } }]] }}
+    );
+  } catch(e) {}
   res.json({ success: true, winnings, newBalance });
 });
 
