@@ -94,15 +94,21 @@ function enterWaiting(){
 }
 function startGameCountdown(){gameStartTimer=setInterval(async()=>{gameStartSecs--;updateGameTimer(gameStartSecs);playTickSound();if(gameStartSecs<=0){clearInterval(gameStartTimer);gameStartTimer=null;document.getElementById('gameTimerWrap').style.display='none';const nums=Object.keys(players).map(Number);if(Math.min(...nums)===myNumber)await launchGame();}},1000);}
 function updateGameTimer(v){const el=document.getElementById('gameTimerNum');if(el)el.textContent=v+'s';}
-async function launchGame(){await remove(r('game'));await set(r('game'),{started:true,winner:null,startedAt:Date.now(),lastBallAt:Date.now()-1500,ballCount:0});startBallCaller();listenBalls();}
-function startBallCaller(){stopBallCaller();ballCallerInterval=setInterval(tryCallBall,1000);}
+async function launchGame(){
+  const potSnap=await get(r('game/pot'));
+  const currentPot=potSnap.val()||0;
+  await remove(r('game'));
+  await set(r('game'),{started:true,winner:null,startedAt:Date.now(),lastBallAt:Date.now()-1500,ballCount:0,pot:currentPot});
+  startBallCaller();listenBalls();
+}
+function startBallCaller(){stopBallCaller();ballCallerInterval=setInterval(tryCallBall,1800);}
 function stopBallCaller(){if(ballCallerInterval){clearInterval(ballCallerInterval);ballCallerInterval=null;}}
 async function tryCallBall(){
   if(gameOver||winnerAlreadySet)return;
   try{
     const gameSnap=await get(r('game'));const gameData=gameSnap.val();
     if(!gameData||!gameData.started||gameData.winner)return;
-    const now=Date.now();if(now-(gameData.lastBallAt||0)<900)return;
+    const now=Date.now();if(now-(gameData.lastBallAt||0)<1600)return;
     const playersSnap=await get(r('lobby/players'));const pData=playersSnap.val()||{};
     const activeNums=Object.keys(pData).map(Number).filter(n=>(now-(pData[n].lastSeen||pData[n].joinedAt||0))<30000);
     if(!activeNums.length)return;if(Math.min(...activeNums)!==myNumber)return;
@@ -114,12 +120,44 @@ async function tryCallBall(){
 }
 function listenBalls(){
   if(unsubBalls)return;
-  unsubBalls=onValue(r('game/balls'),snap=>{const newBalls=snap.val()?Object.values(snap.val()):[];if(newBalls.length>calledBalls.length)playBallSound();calledBalls=newBalls;calledBalls.forEach(n=>autoMark(n));refreshDisplay();updateStats();checkWin();});
-  if(!unsubWinner){unsubWinner=onValue(r('game/winner'),snap=>{const w=snap.val();if(w&&w.boardNum)showWinner(w);});}
+  unsubBalls=onValue(r('game/balls'),snap=>{
+    const newBalls=snap.val()?Object.values(snap.val()):[];
+    if(newBalls.length>calledBalls.length)playBallSound();
+    calledBalls=newBalls;
+    calledBalls.forEach(n=>autoMark(n));
+    refreshDisplay();updateStats();checkWin();
+  });
+  if(!unsubWinner){
+    unsubWinner=onValue(r('game/winner'),snap=>{const w=snap.val();if(w&&w.boardNum)showWinner(w);});
+  }
+  onValue(r('game/started'),snap=>{
+    if(snap.val()===null&&!gameOver&&myNumber!==null){
+      setTimeout(()=>{if(!gameOver)leaveGame();},3000);
+    }
+  });
 }
 function autoMark(n){myCard.forEach((cell,i)=>{if(i===12)return;if(cell.num===n&&!myMarked.has(i)){myMarked.add(i);document.querySelector(`[data-i="${i}"]`)?.classList.add('marked');}});}
 function toggleMark(i){if(!calledBalls.includes(myCard[i]?.num)){toast('Not called yet!');return;}if(myMarked.has(i)){myMarked.delete(i);document.querySelector(`[data-i="${i}"]`)?.classList.remove('marked');}else{myMarked.add(i);document.querySelector(`[data-i="${i}"]`)?.classList.add('marked');}updateStats();checkWin();}
-function refreshDisplay(){if(!calledBalls.length)return;const latest=calledBalls[calledBalls.length-1];const letter=letterOf(latest);const ball=document.getElementById('callerBall');ball.classList.remove('pop');void ball.offsetWidth;ball.classList.add('pop');ball.style.background=ballGrad(letter);ball.style.boxShadow=ballGlow(letter);ball.style.color='#1a1200';ball.textContent=latest;document.getElementById('callerLetter').textContent=letter;document.getElementById('callerBig').textContent=letter+'-'+latest;const wrap=document.getElementById('calledWrap');wrap.innerHTML='';[...calledBalls].reverse().forEach((n,idx)=>{const c=document.createElement('div');c.className='chip'+(idx===0?' fresh':'');c.textContent=letterOf(n)+n;wrap.appendChild(c);});}
+function refreshDisplay(){
+  if(!calledBalls.length)return;
+  const latest=calledBalls[calledBalls.length-1];
+  const letter=letterOf(latest);
+  const ball=document.getElementById('callerBall');
+  ball.classList.remove('pop');void ball.offsetWidth;ball.classList.add('pop');
+  ball.style.background=ballGrad(letter);ball.style.boxShadow=ballGlow(letter);ball.style.color='#1a1200';
+  ball.textContent=latest;
+  document.getElementById('callerLetter').textContent=letter;
+  document.getElementById('callerBig').textContent=letter+'-'+latest;
+  const wrap=document.getElementById('calledWrap');
+  wrap.innerHTML='';
+  [...calledBalls].reverse().forEach((n,idx)=>{
+    const c=document.createElement('div');
+    c.className='chip'+(idx===0?' fresh':'');
+    c.textContent=letterOf(n)+n;
+    wrap.appendChild(c);
+  });
+  wrap.scrollLeft=0;
+}
 function updateStats(){document.getElementById('sCalled').textContent=calledBalls.length;document.getElementById('sPlayers').textContent=Object.keys(players).length;updateDerash();}
 function generateCard(){myCard=[];const ranges=[[1,15],[16,30],[31,45],[46,60],[61,75]];for(let row=0;row<5;row++)for(let c=0;c<5;c++)myCard.push({col:c,row,num:null});for(let c=0;c<5;c++){const[lo,hi]=ranges[c],nums=[];while(nums.length<5){const n=Math.floor(Math.random()*(hi-lo+1))+lo;if(!nums.includes(n))nums.push(n);}for(let row=0;row<5;row++)myCard[row*5+c].num=nums[row];}}
 function renderCard(){const g=document.getElementById('bingoGrid');g.innerHTML='';myMarked=new Set([12]);myCard.forEach((cell,i)=>{const d=document.createElement('div');d.className='cell';d.dataset.i=i;if(i===12){d.classList.add('free','marked');d.textContent='FREE';}else{d.textContent=cell.num;d.onclick=()=>toggleMark(i);}g.appendChild(d);});}
@@ -156,7 +194,7 @@ async function leaveGame(){
     if(myNumber){await remove(r('lobby/players/'+myNumber));await remove(r('lobby/taken/'+myNumber));}
     const snap=await get(r('lobby/players'));const remaining=snap.val()?Object.keys(snap.val()).length:0;
     const gameSnap=await get(r('game/started'));
-    if(!gameSnap.val()&&myUser){try{const res=await fetch(`${SERVER}/api/refund`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser.telegramId})});const data=await res.json();if(data.newBalance!==undefined){myUser.balance=data.newBalance;}}catch(e){}}
+    if(!gameSnap.val()&&myUser){try{const res=await fetch(`${SERVER}/api/refund`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser.telegramId})});const data=await res.json();if(data.newBalance!==undefined)myUser.balance=data.newBalance;}catch(e){}}
     if(remaining===0){const cSnap=await get(r('gameCounter'));await set(r('gameCounter'),(cSnap.val()||1)+1);await remove(r('game'));await remove(r('lobby'));}
   }catch(e){}
   myNumber=null;myCard=[];myMarked=new Set([12]);calledBalls=[];players={};gameOver=false;winnerAlreadySet=false;
@@ -207,7 +245,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .stat-item .slbl{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .stat-item .sval{font-size:13px;font-weight:700}
 .stat-item .sval.gold{color:var(--gold)}
-.called-bar{display:flex;align-items:center;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 8px;width:100%;margin-bottom:4px;overflow-x:auto;min-height:28px}
+.called-bar{display:flex;align-items:center;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 8px;width:100%;margin-bottom:4px;overflow-x:auto;min-height:28px;flex-wrap:nowrap;scroll-behavior:smooth}
 .called-bar::-webkit-scrollbar{display:none}
 .chip{background:var(--card2);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:9px;font-weight:700;color:var(--muted);white-space:nowrap;flex-shrink:0}
 .chip.fresh{border-color:var(--gold);color:var(--gold)}
