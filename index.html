@@ -130,8 +130,11 @@ function listenBalls(){
   if(!unsubWinner){
     unsubWinner=onValue(r('game/winner'),snap=>{const w=snap.val();if(w&&w.boardNum)showWinner(w);});
   }
+  // Only return to lobby if game was started then wiped
+  let gameWasStarted=false;
   onValue(r('game/started'),snap=>{
-    if(snap.val()===null&&!gameOver&&myNumber!==null){
+    if(snap.val()===true)gameWasStarted=true;
+    if(snap.val()===null&&gameWasStarted&&!gameOver&&myNumber!==null){
       setTimeout(()=>{if(!gameOver)leaveGame();},3000);
     }
   });
@@ -193,8 +196,17 @@ async function leaveGame(){
   try{
     if(myNumber){await remove(r('lobby/players/'+myNumber));await remove(r('lobby/taken/'+myNumber));}
     const snap=await get(r('lobby/players'));const remaining=snap.val()?Object.keys(snap.val()).length:0;
+    // Only refund if game never started AND no balls were called yet
     const gameSnap=await get(r('game/started'));
-    if(!gameSnap.val()&&myUser){try{const res=await fetch(`${SERVER}/api/refund`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser.telegramId})});const data=await res.json();if(data.newBalance!==undefined)myUser.balance=data.newBalance;}catch(e){}}
+    const noBallsCalled=calledBalls.length===0;
+    const gameNeverStarted=!gameSnap.val();
+    if(gameNeverStarted&&noBallsCalled&&remaining===0&&myUser&&!gameOver){
+      try{
+        const res=await fetch(`${SERVER}/api/refund`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:myUser.telegramId})});
+        const data=await res.json();
+        if(data.newBalance!==undefined){myUser.balance=data.newBalance;toast('10 ETB refunded!');}
+      }catch(e){}
+    }
     if(remaining===0){const cSnap=await get(r('gameCounter'));await set(r('gameCounter'),(cSnap.val()||1)+1);await remove(r('game'));await remove(r('lobby'));}
   }catch(e){}
   myNumber=null;myCard=[];myMarked=new Set([12]);calledBalls=[];players={};gameOver=false;winnerAlreadySet=false;
