@@ -44,7 +44,7 @@ async function init(){
   if(tgUser){const res=await fetch(`${SERVER}/api/user`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:tgUser.id,name:tgUser.first_name,username:tgUser.username||''})});myUser=await res.json();}
   else{myUser={telegramId:'demo_'+Math.floor(Math.random()*9999),name:'Demo Player',balance:0};}
   updateBalanceUI();
-  try{const cSnap=await get(r('gameCounter'));const currentCount=cSnap.val()||1;const playersSnap=await get(r('lobby/players'));const now=Date.now();const pData=playersSnap.val()||{};const activePlayers=Object.values(pData).filter(p=>(now-(p.lastSeen||p.joinedAt||0))<30000);if(activePlayers.length===0){await remove(r('game'));await remove(r('lobby'));await set(r('gameCounter'),currentCount);}}catch(e){}
+  try{const cSnap=await get(r('gameCounter'));const currentCount=cSnap.val()||1;const playersSnap=await get(r('lobby/players'));const now=Date.now();const pData=playersSnap.val()||{};const activePlayers=Object.values(pData).filter(p=>(now-(p.lastSeen||p.joinedAt||0))<300000);if(activePlayers.length===0){await remove(r('game'));await remove(r('lobby'));await set(r('gameCounter'),currentCount);}}catch(e){}
   onValue(r('gameCounter'),snap=>{gameCounter=snap.val()||1;document.getElementById('lobbyGameNum').textContent='Game #'+gameCounter;document.getElementById('gameScreenNum').textContent='Game #'+gameCounter;});
   buildPicker();show('lobbyScreen');
 }
@@ -65,7 +65,14 @@ function buildPicker(){
   onValue(r('lobby/taken'),snap=>{const taken=snap.val()||{};for(let i=1;i<=100;i++){const el=document.getElementById('nb'+i);if(!el)continue;el.className='num-btn';if(taken[i]&&taken[i]!==myNumber)el.classList.add('taken');else if(taken[i]===myNumber)el.classList.add('mine');}});
   onValue(r('lobby/players'),snap=>{const p=snap.val()||{};document.getElementById('lobbyPlayerCount').textContent=Object.keys(p).length+' online';});
 }
-async function cleanGhostPlayers(){try{const snap=await get(r('lobby/players'));const p=snap.val()||{};const now=Date.now();for(const[num,data]of Object.entries(p)){if((now-(data.lastSeen||data.joinedAt||0))>30000){await remove(r('lobby/players/'+num));await remove(r('lobby/taken/'+num));}}}catch(e){}}
+async function cleanGhostPlayers(){
+  try{const snap=await get(r('lobby/players'));const p=snap.val()||{};const now=Date.now();
+  for(const[num,data]of Object.entries(p)){
+    if((now-(data.lastSeen||data.joinedAt||0))>300000){
+      await remove(r('lobby/players/'+num));await remove(r('lobby/taken/'+num));
+    }
+  }}catch(e){}
+}
 async function pickNumber(n){
   if(!myUser)return;
   const bal=myUser.balance??myUser.credits??0;
@@ -97,7 +104,6 @@ function updateGameTimer(v){const el=document.getElementById('gameTimerNum');if(
 async function launchGame(){
   const potSnap=await get(r('game/pot'));
   const currentPot=potSnap.val()||0;
-  // Use set not remove+set to avoid null flash that triggers leaveGame
   await set(r('game'),{started:true,winner:null,startedAt:Date.now(),lastBallAt:Date.now()-1500,ballCount:0,pot:currentPot});
   startBallCaller();listenBalls();
 }
@@ -110,7 +116,8 @@ async function tryCallBall(){
     if(!gameData||!gameData.started||gameData.winner)return;
     const now=Date.now();if(now-(gameData.lastBallAt||0)<1600)return;
     const playersSnap=await get(r('lobby/players'));const pData=playersSnap.val()||{};
-    const activeNums=Object.keys(pData).map(Number).filter(n=>(now-(pData[n].lastSeen||pData[n].joinedAt||0))<30000);
+    // All players count - no heartbeat timeout so backgrounding doesn't stop calling
+    const activeNums=Object.keys(pData).map(Number);
     if(!activeNums.length)return;if(Math.min(...activeNums)!==myNumber)return;
     const existing=gameData.balls?Object.values(gameData.balls):[];if(existing.length>=75)return;
     const pool=[];for(let i=1;i<=75;i++)if(!existing.includes(i))pool.push(i);if(!pool.length)return;
@@ -130,7 +137,6 @@ function listenBalls(){
   if(!unsubWinner){
     unsubWinner=onValue(r('game/winner'),snap=>{const w=snap.val();if(w&&w.boardNum)showWinner(w);});
   }
-  // Only return to lobby if game was wiped - with double-check delay
   let gameWasStarted=false;
   let gameEndTimer=null;
   onValue(r('game/started'),snap=>{
@@ -169,7 +175,7 @@ function refreshDisplay(){
     c.textContent=letterOf(n)+n;
     wrap.appendChild(c);
   });
-  wrap.scrollLeft=0;
+  wrap.scrollTop=0;
 }
 function updateStats(){document.getElementById('sCalled').textContent=calledBalls.length;document.getElementById('sPlayers').textContent=Object.keys(players).length;updateDerash();}
 function generateCard(){myCard=[];const ranges=[[1,15],[16,30],[31,45],[46,60],[61,75]];for(let row=0;row<5;row++)for(let c=0;c<5;c++)myCard.push({col:c,row,num:null});for(let c=0;c<5;c++){const[lo,hi]=ranges[c],nums=[];while(nums.length<5){const n=Math.floor(Math.random()*(hi-lo+1))+lo;if(!nums.includes(n))nums.push(n);}for(let row=0;row<5;row++)myCard[row*5+c].num=nums[row];}}
@@ -262,7 +268,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .stat-item .slbl{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .stat-item .sval{font-size:13px;font-weight:700}
 .stat-item .sval.gold{color:var(--gold)}
-.called-bar{display:flex;align-items:center;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 8px;width:100%;margin-bottom:4px;overflow-x:auto;min-height:28px;flex-wrap:nowrap;scroll-behavior:smooth}
+.called-bar{display:flex;align-items:flex-start;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 8px;width:100%;margin-bottom:4px;overflow-y:auto;max-height:52px;flex-wrap:wrap;scroll-behavior:smooth}
 .called-bar::-webkit-scrollbar{display:none}
 .chip{background:var(--card2);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:9px;font-weight:700;color:var(--muted);white-space:nowrap;flex-shrink:0}
 .chip.fresh{border-color:var(--gold);color:var(--gold)}
