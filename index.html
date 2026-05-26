@@ -65,14 +65,7 @@ function buildPicker(){
   onValue(r('lobby/taken'),snap=>{const taken=snap.val()||{};for(let i=1;i<=100;i++){const el=document.getElementById('nb'+i);if(!el)continue;el.className='num-btn';if(taken[i]&&taken[i]!==myNumber)el.classList.add('taken');else if(taken[i]===myNumber)el.classList.add('mine');}});
   onValue(r('lobby/players'),snap=>{const p=snap.val()||{};document.getElementById('lobbyPlayerCount').textContent=Object.keys(p).length+' online';});
 }
-async function cleanGhostPlayers(){
-  try{const snap=await get(r('lobby/players'));const p=snap.val()||{};const now=Date.now();
-  for(const[num,data]of Object.entries(p)){
-    if((now-(data.lastSeen||data.joinedAt||0))>300000){
-      await remove(r('lobby/players/'+num));await remove(r('lobby/taken/'+num));
-    }
-  }}catch(e){}
-}
+async function cleanGhostPlayers(){try{const snap=await get(r('lobby/players'));const p=snap.val()||{};const now=Date.now();for(const[num,data]of Object.entries(p)){if((now-(data.lastSeen||data.joinedAt||0))>300000){await remove(r('lobby/players/'+num));await remove(r('lobby/taken/'+num));}}}catch(e){}}
 async function pickNumber(n){
   if(!myUser)return;
   const bal=myUser.balance??myUser.credits??0;
@@ -116,7 +109,6 @@ async function tryCallBall(){
     if(!gameData||!gameData.started||gameData.winner)return;
     const now=Date.now();if(now-(gameData.lastBallAt||0)<1600)return;
     const playersSnap=await get(r('lobby/players'));const pData=playersSnap.val()||{};
-    // All players count - no heartbeat timeout so backgrounding doesn't stop calling
     const activeNums=Object.keys(pData).map(Number);
     if(!activeNums.length)return;if(Math.min(...activeNums)!==myNumber)return;
     const existing=gameData.balls?Object.values(gameData.balls):[];if(existing.length>=75)return;
@@ -167,15 +159,32 @@ function refreshDisplay(){
   ball.textContent=latest;
   document.getElementById('callerLetter').textContent=letter;
   document.getElementById('callerBig').textContent=letter+'-'+latest;
+  // Update called numbers grid
   const wrap=document.getElementById('calledWrap');
-  wrap.innerHTML='';
-  [...calledBalls].reverse().forEach((n,idx)=>{
-    const c=document.createElement('div');
-    c.className='chip'+(idx===0?' fresh':'');
-    c.textContent=letterOf(n)+n;
-    wrap.appendChild(c);
-  });
-  wrap.scrollTop=0;
+  const cols=[[1,15],[16,30],[31,45],[46,60],[61,75]];
+  if(wrap.children.length!==5){
+    wrap.innerHTML='';
+    cols.forEach(([lo,hi])=>{
+      const col=document.createElement('div');col.className='called-col';
+      for(let n=lo;n<=hi;n++){
+        const d=document.createElement('div');
+        d.className='called-num';d.id='cn'+n;d.textContent=n;
+        col.appendChild(d);
+      }
+      wrap.appendChild(col);
+    });
+  }
+  for(let n=1;n<=75;n++){
+    const el=document.getElementById('cn'+n);
+    if(!el)continue;
+    if(n===latest&&calledBalls.includes(n)){
+      el.className='called-num hit-new';
+    } else if(calledBalls.includes(n)){
+      el.className='called-num hit';
+    } else {
+      el.className='called-num';
+    }
+  }
 }
 function updateStats(){document.getElementById('sCalled').textContent=calledBalls.length;document.getElementById('sPlayers').textContent=Object.keys(players).length;updateDerash();}
 function generateCard(){myCard=[];const ranges=[[1,15],[16,30],[31,45],[46,60],[61,75]];for(let row=0;row<5;row++)for(let c=0;c<5;c++)myCard.push({col:c,row,num:null});for(let c=0;c<5;c++){const[lo,hi]=ranges[c],nums=[];while(nums.length<5){const n=Math.floor(Math.random()*(hi-lo+1))+lo;if(!nums.includes(n))nums.push(n);}for(let row=0;row<5;row++)myCard[row*5+c].num=nums[row];}}
@@ -221,7 +230,10 @@ async function leaveGame(){
     if(remaining===0){const cSnap=await get(r('gameCounter'));await set(r('gameCounter'),(cSnap.val()||1)+1);await remove(r('game'));await remove(r('lobby'));}
   }catch(e){}
   myNumber=null;myCard=[];myMarked=new Set([12]);calledBalls=[];players={};gameOver=false;winnerAlreadySet=false;
-  document.getElementById('winOverlay').classList.remove('show');document.getElementById('calledWrap').innerHTML='';document.getElementById('gameTimerWrap').style.display='none';
+  document.getElementById('winOverlay').classList.remove('show');
+  document.getElementById('calledWrap').innerHTML='';
+  document.getElementById('gameTimerWrap').style.display='none';
+  for(let n=1;n<=75;n++){const el=document.getElementById('cn'+n);if(el)el.className='called-num';}
   const cb=document.getElementById('callerBall');cb.textContent='?';cb.style.cssText='';document.getElementById('callerLetter').textContent='';document.getElementById('callerBig').textContent='';
   show('lobbyScreen');buildPicker();
 }
@@ -268,10 +280,21 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .stat-item .slbl{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .stat-item .sval{font-size:13px;font-weight:700}
 .stat-item .sval.gold{color:var(--gold)}
-.called-bar{display:flex;align-items:flex-start;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 8px;width:100%;margin-bottom:4px;overflow-y:auto;max-height:52px;flex-wrap:wrap;scroll-behavior:smooth}
-.called-bar::-webkit-scrollbar{display:none}
-.chip{background:var(--card2);border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:9px;font-weight:700;color:var(--muted);white-space:nowrap;flex-shrink:0}
-.chip.fresh{border-color:var(--gold);color:var(--gold)}
+/* Called numbers BINGO grid */
+.called-grid-wrap{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 6px;width:100%;margin-bottom:4px}
+.called-grid-header{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin-bottom:2px;text-align:center}
+.called-grid-header span{font-family:'Abril Fatface',serif;font-size:11px;padding:1px 0}
+.called-grid-header span:nth-child(1){color:var(--gold)}
+.called-grid-header span:nth-child(2){color:var(--pink)}
+.called-grid-header span:nth-child(3){color:var(--cyan)}
+.called-grid-header span:nth-child(4){color:var(--green)}
+.called-grid-header span:nth-child(5){color:var(--purple)}
+.called-grid-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+.called-col{display:flex;flex-direction:column;gap:2px}
+.called-num{height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--muted);background:var(--card2);transition:all .2s}
+.called-num.hit{background:var(--gold2);color:#1a1200;transform:scale(1.05)}
+.called-num.hit-new{background:var(--gold);color:#1a1200;box-shadow:0 0 6px rgba(245,200,66,.7);animation:numPop .3s ease}
+@keyframes numPop{0%{transform:scale(1.3)}100%{transform:scale(1.05)}}
 .bingo-header{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-bottom:3px}
 .bingo-header span{font-family:'Abril Fatface',serif;font-size:clamp(15px,3.8vw,24px);text-align:center;padding:3px 0}
 .bingo-header span:nth-child(1){color:var(--gold)}
@@ -352,7 +375,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
     <div class="stat-item"><span class="slbl">Players</span><span class="sval" id="sPlayers">–</span></div>
     <div class="stat-item"><span class="slbl">Derash</span><span class="sval gold derash-display">0 ETB</span></div>
   </div>
-  <div class="called-bar" id="calledWrap"></div>
+  <div class="called-grid-wrap">
+    <div class="called-grid-header"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
+    <div class="called-grid-cols" id="calledWrap"></div>
+  </div>
   <div style="width:100%">
     <div class="bingo-header"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
     <div class="bingo-grid" id="bingoGrid"></div>
