@@ -89,7 +89,18 @@ function enterWaiting(){
   show('gameScreen');document.getElementById('myBoardBadge').textContent='#'+myNumber;
   gameStartSecs=30;updateGameTimer(30);document.getElementById('gameTimerWrap').style.display='flex';
   startMusic();startHeartbeat();
-  unsubPlayers=onValue(r('lobby/players'),snap=>{players=snap.val()||{};const count=Object.keys(players).length;document.getElementById('sPlayers').textContent=count;updateDerash();if(count>=2){if(!gameStartTimer)startGameCountdown();}else{clearInterval(gameStartTimer);gameStartTimer=null;gameStartSecs=30;updateGameTimer(30);}});
+  unsubPlayers=onValue(r('lobby/players'),snap=>{players=snap.val()||{};const count=Object.keys(players).length;document.getElementById('sPlayers').textContent=count;updateDerash();});
+  // Listen to SERVER countdown — server controls the timer, not the client
+  onValue(r('game/lobbyCountdown'),snap=>{
+    const secs=snap.val();
+    if(secs===null||secs===undefined)return;
+    if(secs>0){
+      document.getElementById('gameTimerWrap').style.display='flex';
+      updateGameTimer(secs);
+    } else {
+      document.getElementById('gameTimerWrap').style.display='none';
+    }
+  });
   unsubLobbyGame=onValue(r('game/started'),snap=>{if(snap.val()===true){clearInterval(gameStartTimer);gameStartTimer=null;document.getElementById('gameTimerWrap').style.display='none';startBallCaller();listenBalls();}});
 }
 function startGameCountdown(){gameStartTimer=setInterval(async()=>{gameStartSecs--;updateGameTimer(gameStartSecs);playTickSound();if(gameStartSecs<=0){clearInterval(gameStartTimer);gameStartTimer=null;document.getElementById('gameTimerWrap').style.display='none';const nums=Object.keys(players).map(Number);if(Math.min(...nums)===myNumber)await launchGame();}},1000);}
@@ -394,4 +405,4 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 <div class="win-overlay" id="winOverlay"></div>
 <div class="toast" id="toast"></div>
 </body>
-</html>
+      </html>
