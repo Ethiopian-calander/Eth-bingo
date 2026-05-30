@@ -145,7 +145,37 @@ async function addBotsToFirebaseLobby(realPlayerCount) {
     console.log(`🤖 Bot ${bot.name} joined lobby as #${bot.num}`);
   }
 
-  console.log(`✅ ${botsToAdd.length} bots in lobby — frontend timer will start`);
+  console.log(`✅ ${botsToAdd.length} bots in lobby — starting 30s server countdown`);
+
+  // ── SERVER-SIDE AUTO-START COUNTDOWN ─────────────────────────────────────
+  // Server counts down 30 seconds and writes game/started=true automatically.
+  // All frontends react to this — no real player needed to trigger the game.
+  let secsLeft = 30;
+  await db.ref('game/lobbyCountdown').set(secsLeft);
+
+  const countdownInterval = setInterval(async () => {
+    secsLeft--;
+    await db.ref('game/lobbyCountdown').set(secsLeft);
+
+    if (secsLeft <= 0) {
+      clearInterval(countdownInterval);
+      const startedSnap = await db.ref('game/started').once('value');
+      if (startedSnap.val() === true) return; // already started
+
+      const potSnap = await db.ref('game/pot').once('value');
+      await db.ref('game').update({
+        started:    true,
+        startedAt:  Date.now(),
+        lastBallAt: Date.now() - 1500,
+        ballCount:  0,
+        pot:        potSnap.val() || 0,
+        winner:     null,
+        lobbyCountdown: 0
+      });
+      console.log('▶️  Game auto-started by server after 30s');
+    }
+  }, 1000);
+
   return activeBotIds;
 }
 
