@@ -260,9 +260,19 @@ async function payBot(botId, pot) {
     totalWon: (snap.val()?.totalWon||0) + winnings
   });
 
+  // Write winner info including the bot's cartela so frontend can display it
   await db.ref('game').update({
     paidOut: true,
-    winner: { boardNum:bot.num, telegramId:botId, name:bot.name, isBot:true, winnings, ts:Date.now() }
+    winner: {
+      boardNum:   bot.num,
+      telegramId: botId,
+      name:       bot.name,
+      isBot:      true,
+      winnings,
+      ts:         Date.now(),
+      card:       botCard,          // bot's full cartela
+      calledNums: engine.called     // all called numbers at time of win
+    }
   });
 
   console.log(`🤖 Bot ${bot.name} won ${winnings} ETB`);
