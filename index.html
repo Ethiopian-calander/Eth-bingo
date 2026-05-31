@@ -541,18 +541,55 @@ async function showWinner(w){
   const title = document.createElement('div'); title.className='win-big'; title.textContent = isMe?'🎉 BINGO!':'GAME OVER'; overlay.appendChild(title);
   const sub   = document.createElement('div'); sub.className='win-sub-text'; sub.textContent = isMe?`You won ${winnings} ETB! 🎊`:`Board #${w.boardNum} wins!`; overlay.appendChild(sub);
 
-  // Winner board
+  // Build winner board — works for both real player and bot
   const bw = document.createElement('div'); bw.className='winner-board-wrap';
   const bh = document.createElement('div'); bh.className='winner-board-header';
   ['B','I','N','G','O'].forEach((l,i)=>{ const s=document.createElement('span'); s.textContent=l; s.style.color=['#f5c842','#ff4d8f','#00e5ff','#39ff6e','#bf8fff'][i]; bh.appendChild(s); });
   bw.appendChild(bh);
   const bg = document.createElement('div'); bg.className='winner-board-grid';
-  myCard.forEach((cell,i)=>{
-    const d=document.createElement('div'); d.className='winner-cell';
-    if (i===12){ d.classList.add('wc-free'); d.textContent='★'; }
-    else { d.textContent=cell.num; if(myMarked.has(i))d.classList.add('wc-marked'); if(w.winLine&&w.winLine.includes(i))d.classList.add('wc-win'); }
-    bg.appendChild(d);
-  });
+
+  if (isMe) {
+    // Show MY card — row-major flat array
+    myCard.forEach((cell,i)=>{
+      const d=document.createElement('div'); d.className='winner-cell';
+      if (i===12){ d.classList.add('wc-free'); d.textContent='★'; }
+      else {
+        d.textContent=cell.num;
+        if (myMarked.has(i)) d.classList.add('wc-marked');
+        if (w.winLine && w.winLine.includes(i)) d.classList.add('wc-win');
+      }
+      bg.appendChild(d);
+    });
+  } else {
+    // Show BOT's card — column-major: w.card[col][row]
+    // Convert to row-major for display
+    const botCard    = w.card;        // array of 5 columns, each 5 values
+    const botCalled  = w.calledNums || calledBalls;
+
+    if (botCard && botCard.length === 5) {
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col < 5; col++) {
+          const val  = botCard[col][row];
+          const free = val === 'FREE';
+          const hit  = !free && botCalled.includes(val);
+          const d    = document.createElement('div'); d.className='winner-cell';
+          if (free) { d.classList.add('wc-free'); d.textContent='★'; }
+          else {
+            d.textContent = val;
+            if (hit) d.classList.add('wc-win'); // highlight all called numbers on bot card
+          }
+          bg.appendChild(d);
+        }
+      }
+    } else {
+      // Fallback if card not available
+      const msg = document.createElement('div');
+      msg.style.cssText='grid-column:span 5;text-align:center;color:var(--muted);font-size:12px;padding:16px';
+      msg.textContent='Card not available';
+      bg.appendChild(msg);
+    }
+  }
+
   bw.appendChild(bg); overlay.appendChild(bw);
 
   // Countdown timer
