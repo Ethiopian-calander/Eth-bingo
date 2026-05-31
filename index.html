@@ -362,18 +362,22 @@ function enterGame(){
   });
 
   // ── Listen to game started ────────────────────────────────────────────────
+  let gameHasStarted = false; // track if game actually ran
   unsubStarted = onValue(r('game/started'), snap => {
     if (snap.val() === true){
+      gameHasStarted = true; // game is now running
       document.getElementById('gameTimerWrap').style.display = 'none';
       listenBalls();
     }
-    // If game resets (snap.val() becomes null/false) while I'm on game screen
-    // and I haven't won — go back to lobby
-    if ((snap.val() === null || snap.val() === false) && !gameOver){
+    // Only go to lobby if:
+    // 1. Game HAD started (we were actually playing), AND
+    // 2. It reset back to false/null (game ended), AND
+    // 3. We didn't already handle it via win screen
+    if ((snap.val() === null || snap.val() === false) && gameHasStarted && !gameOver){
       setTimeout(async () => {
         const check = await get(r('game/started'));
         if (!check.val() && !gameOver){ goToLobby(); }
-      }, 3000);
+      }, 5000); // wait 5s to make sure it's a real reset, not a brief flicker
     }
   });
 
