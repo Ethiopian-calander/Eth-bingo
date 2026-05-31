@@ -72,11 +72,28 @@ function mkCartela() {
 }
 
 function hasBingo(card, called) {
-  const h=(c,r)=>card[c][r]==='FREE'||called.includes(card[c][r]);
-  for(let r=0;r<5;r++) if([0,1,2,3,4].every(c=>h(c,r))) return true;
-  for(let c=0;c<5;c++) if([0,1,2,3,4].every(r=>h(c,r))) return true;
-  if([0,1,2,3,4].every(i=>h(i,i))) return true;
-  if([0,1,2,3,4].every(i=>h(i,4-i))) return true;
+  // card is column-major: card[col][row]
+  // card[col] is an array of 5 numbers for that column
+  // called is a flat array of called numbers
+
+  const hit = (col, row) => {
+    const val = card[col][row];
+    return val === 'FREE' || called.includes(val);
+  };
+
+  // Check 5 rows (horizontal lines)
+  for (let row = 0; row < 5; row++) {
+    if ([0,1,2,3,4].every(col => hit(col, row))) return true;
+  }
+  // Check 5 columns (vertical lines)
+  for (let col = 0; col < 5; col++) {
+    if ([0,1,2,3,4].every(row => hit(col, row))) return true;
+  }
+  // Top-left to bottom-right diagonal
+  if ([0,1,2,3,4].every(i => hit(i, i))) return true;
+  // Top-right to bottom-left diagonal
+  if ([0,1,2,3,4].every(i => hit(i, 4-i))) return true;
+
   return false;
 }
 
@@ -202,7 +219,9 @@ async function doGame() {
       await db.ref('game/balls').push(n);
       await db.ref('game').update({ lastBallAt:Date.now(), ballCount:engine.called.length });
 
-      // Check bots for win
+      // Check bots for win — need at least 4 called numbers for any possible bingo
+      // (FREE counts as 1, so minimum 4 more needed for a line of 5)
+      if (engine.called.length < 4) return;
       for (const [botId, card] of Object.entries(engine.botCards)) {
         if (hasBingo(card, engine.called)) {
           engine.won = true;
@@ -222,6 +241,13 @@ async function doGame() {
 async function payBot(botId, pot) {
   const paidSnap = await db.ref('game/paidOut').once('value');
   if (paidSnap.val()) return; // real player won first
+
+  // Double-verify the bot actually has bingo before paying
+  const botCard = engine.botCards[botId];
+  if (!botCard || !hasBingo(botCard, engine.called)) {
+    console.log(`⚠️  Bot ${botId} bingo double-check FAILED — skipping payout`);
+    return;
+  }
 
   const winnings = Math.floor(pot * WINNER_CUT);
   const bot      = BOTS.find(b => b.id === botId);
