@@ -32,9 +32,6 @@ const BANKS = {
   abyssinia: { name: 'Bank of Abyssinia', emoji: '🏛️', account: '206543108',     holder: 'Dawit Mamo' }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BOTS
-// ─────────────────────────────────────────────────────────────────────────────
 const BOTS = [
   { id:-1,  name:'Abebe',   num:7  },
   { id:-2,  name:'Meron',   num:14 },
@@ -72,89 +69,60 @@ function mkCartela() {
 }
 
 function hasBingo(card, called) {
-  // card is column-major: card[col][row]
-  // card[col] is an array of 5 numbers for that column
-  // called is a flat array of called numbers
-
   const hit = (col, row) => {
     const val = card[col][row];
     return val === 'FREE' || called.includes(val);
   };
-
-  // Check 5 rows (horizontal lines)
   for (let row = 0; row < 5; row++) {
     if ([0,1,2,3,4].every(col => hit(col, row))) return true;
   }
-  // Check 5 columns (vertical lines)
   for (let col = 0; col < 5; col++) {
     if ([0,1,2,3,4].every(row => hit(col, row))) return true;
   }
-  // Top-left to bottom-right diagonal
   if ([0,1,2,3,4].every(i => hit(i, i))) return true;
-  // Top-right to bottom-left diagonal
   if ([0,1,2,3,4].every(i => hit(i, 4-i))) return true;
-
   return false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GAME ENGINE — one function that runs the whole cycle forever
-// ─────────────────────────────────────────────────────────────────────────────
 let engine = { running:false, botCards:{}, called:[], won:false, ballTimer:null };
 
 async function runGameCycle() {
   if (engine.running) return;
   engine.running = true;
-
   try {
     await doLobby();
     if (!engine.won) await doGame();
   } catch(e) {
     console.error('Engine error:', e.message);
   }
-
   engine.running = false;
-  // Always restart — 5 second gap between games
   console.log('♻️  Next game in 5s...');
   setTimeout(runGameCycle, 5000);
 }
 
-// ── PHASE 1: LOBBY ────────────────────────────────────────────────────────────
 async function doLobby() {
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━');
   engine.botCards = {};
   engine.called   = [];
   engine.won      = false;
   if (engine.ballTimer) { clearInterval(engine.ballTimer); engine.ballTimer=null; }
-
-  // Increment game counter
   const cSnap = await db.ref('gameCounter').once('value');
   const gameNum = (cSnap.val()||0) + 1;
   await db.ref('gameCounter').set(gameNum);
-
-  // Clear previous game data
   await db.ref('game').remove();
   await db.ref('lobby').remove();
-
-  // Set initial state — game NOT started yet so players CAN join
   await db.ref('game').set({
     started: false, paidOut: false, winner: null,
     pot: 0, balls: null, ballCount: 0,
-    countdown: LOBBY_SECS, gameNum,
-    phase: 'lobby'
+    countdown: LOBBY_SECS, gameNum, phase: 'lobby'
   });
-
-  // Add bots to lobby (all 10) — they show in lobby/players so frontend sees them
   let pot = 0;
   for (const b of BOTS) {
-    // Deduct fee from bot
     const ref  = db.ref(`users/${b.id}`);
     const snap = await ref.once('value');
     const bal  = snap.val()?.balance || 50000;
     await ref.update({ balance: Math.max(0, bal - ENTRY_FEE), gamesPlayed:(snap.val()?.gamesPlayed||0)+1 });
     pot += ENTRY_FEE;
-
-    // Write to lobby so frontend picker shows them as taken
     await db.ref(`lobby/players/${b.num}`).set({
       boardNum: b.num, telegramId: b.id, name: b.name,
       isBot: true, joinedAt: Date.now(), lastSeen: Date.now()
@@ -162,65 +130,44 @@ async function doLobby() {
     await db.ref(`lobby/taken/${b.num}`).set(b.num);
     engine.botCards[b.id] = mkCartela();
   }
-
   await db.ref('game/pot').set(pot);
   console.log(`🎰 Game #${gameNum} lobby open — 10 bots joined — pot: ${pot} ETB`);
-
-  // Countdown: tick every second, write to Firebase so all frontends sync
   await new Promise(resolve => {
     let secs = LOBBY_SECS;
     const tick = setInterval(async () => {
       secs--;
       await db.ref('game/countdown').set(secs);
       if (secs % 10 === 0) console.log(`⏱  Countdown: ${secs}s`);
-      if (secs <= 0) {
-        clearInterval(tick);
-        resolve();
-      }
+      if (secs <= 0) { clearInterval(tick); resolve(); }
     }, 1000);
   });
 }
 
-// ── PHASE 2: GAME ─────────────────────────────────────────────────────────────
 async function doGame() {
-  // Get current pot (may have real players added)
   const potSnap = await db.ref('game/pot').once('value');
   const pot     = potSnap.val() || 0;
-
   await db.ref('game').update({
     started: true, startedAt: Date.now(),
     lastBallAt: Date.now()-1500, ballCount: 0,
     pot, phase: 'playing'
   });
-
   const playersSnap = await db.ref('lobby/players').once('value');
   const playerCount = Object.keys(playersSnap.val()||{}).length;
   console.log(`▶️  Game started — ${playerCount} players — pot: ${pot} ETB`);
-
   const pool = Array.from({length:75},(_,i)=>i+1);
   engine.called = [];
   engine.won    = false;
-
   await new Promise(resolve => {
     engine.ballTimer = setInterval(async () => {
       if (engine.won) { resolve(); return; }
-
-      // Check if real player already won
       const paidSnap = await db.ref('game/paidOut').once('value');
       if (paidSnap.val()) { engine.won=true; resolve(); return; }
-
       const remaining = pool.filter(n => !engine.called.includes(n));
       if (!remaining.length) { resolve(); return; }
-
       const n = remaining[Math.floor(Math.random()*remaining.length)];
       engine.called.push(n);
-
-      // Write ball to Firebase — frontend reads this
       await db.ref('game/balls').push(n);
       await db.ref('game').update({ lastBallAt:Date.now(), ballCount:engine.called.length });
-
-      // Check bots for win — need at least 4 called numbers for any possible bingo
-      // (FREE counts as 1, so minimum 4 more needed for a line of 5)
       if (engine.called.length < 4) return;
       for (const [botId, card] of Object.entries(engine.botCards)) {
         if (hasBingo(card, engine.called)) {
@@ -234,53 +181,34 @@ async function doGame() {
       }
     }, BALL_MS);
   });
-
   if (engine.ballTimer) { clearInterval(engine.ballTimer); engine.ballTimer=null; }
 }
 
 async function payBot(botId, pot) {
   const paidSnap = await db.ref('game/paidOut').once('value');
-  if (paidSnap.val()) return; // real player won first
-
-  // Double-verify the bot actually has bingo before paying
+  if (paidSnap.val()) return;
   const botCard = engine.botCards[botId];
-  if (!botCard || !hasBingo(botCard, engine.called)) {
-    console.log(`⚠️  Bot ${botId} bingo double-check FAILED — skipping payout`);
-    return;
-  }
-
+  if (!botCard || !hasBingo(botCard, engine.called)) return;
   const winnings = Math.floor(pot * WINNER_CUT);
   const bot      = BOTS.find(b => b.id === botId);
   const ref      = db.ref(`users/${botId}`);
   const snap     = await ref.once('value');
-
   await ref.update({
     balance: (snap.val()?.balance||0) + winnings,
     gamesWon: (snap.val()?.gamesWon||0) + 1,
     totalWon: (snap.val()?.totalWon||0) + winnings
   });
-
-  // Write winner info including the bot's cartela so frontend can display it
   await db.ref('game').update({
     paidOut: true,
     winner: {
-      boardNum:   bot.num,
-      telegramId: botId,
-      name:       bot.name,
-      isBot:      true,
-      winnings,
-      ts:         Date.now(),
-      card:       botCard,          // bot's full cartela
-      calledNums: engine.called     // all called numbers at time of win
+      boardNum: bot.num, telegramId: botId, name: bot.name,
+      isBot: true, winnings, ts: Date.now(),
+      card: botCard, calledNums: engine.called
     }
   });
-
   console.log(`🤖 Bot ${bot.name} won ${winnings} ETB`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TELEGRAM BOT
-// ─────────────────────────────────────────────────────────────────────────────
 const bot = new TelegramBot(BOT_TOKEN, { polling:{autoStart:false, params:{timeout:10}} });
 
 bot.stopPolling()
@@ -289,7 +217,7 @@ bot.stopPolling()
   .then(async () => {
     console.log('✅ Bot started. Admin:', ADMIN_ID);
     await ensureBots();
-    runGameCycle(); // 🚀 Start game engine
+    runGameCycle();
   })
   .catch(err => { console.error('Poll error:', err.message); setTimeout(()=>bot.startPolling(),5000); });
 
@@ -316,8 +244,8 @@ bot.onText(/\/start/, async msg => {
     { parse_mode:'Markdown', reply_markup:{ inline_keyboard:[
       [{text:'🎯 Play Bingo', web_app:{url:MINI_APP_URL}}],
       [{text:'💰 Deposit ETB',callback_data:'deposit'},{text:'💳 My Balance',callback_data:'balance'}],
-      [{text:'🏆 Leaderboard',callback_data:'leaderboard'},{text:'📋 Instructions',callback_data:'instructions'}],
-      [{text:'👥 Invite Friends +2 ETB',callback_data:'invite'}]
+      [{text:'🏧 Withdraw ETB',callback_data:'withdraw'},{text:'📋 Instructions',callback_data:'instructions'}],
+      [{text:'🏆 Leaderboard',callback_data:'leaderboard'},{text:'👥 Invite +2 ETB',callback_data:'invite'}]
     ]}}
   );
 });
@@ -351,6 +279,58 @@ bot.on('callback_query', async query => {
     const sn=await db.ref(`users/${uid}`).once('value');
     bot.sendMessage(uid,`👥 *Invite Friends and Earn!*\n\nFor every friend who joins you get +2 ETB!\n\nYour bonus: *${sn.val()?.inviteBonus||0} ETB*\n\nYour link:\n${lnk}`,
       {parse_mode:'Markdown', reply_markup:{inline_keyboard:[[{text:'📤 Share Link',url:`https://t.me/share/url?url=${encodeURIComponent(lnk)}&text=${encodeURIComponent('Join me on Ethbingo and win ETB!')}`}]]}});
+  }
+  if (data==='withdraw') {
+    const sn=await db.ref(`users/${uid}`).once('value'), u=sn.val();
+    if (!u){bot.sendMessage(uid,'Please send /start first.');return;}
+    if ((u.balance||0) < 50){
+      bot.sendMessage(uid,`Minimum withdrawal is 50 ETB.\nYour balance: ${u.balance||0} ETB`);return;
+    }
+    bot.sendMessage(uid,
+      `🏧 *Withdraw ETB*\n\nYour balance: *${u.balance} ETB*\nMinimum: *50 ETB*\n\nChoose which bank to receive your money:`,
+      {parse_mode:'Markdown', reply_markup:{inline_keyboard:[
+        [{text:'🏦 CBE Bank',callback_data:'wbank_cbe'}],
+        [{text:'📱 Telebirr',callback_data:'wbank_telebirr'}],
+        [{text:'🏛️ Bank of Abyssinia',callback_data:'wbank_abyssinia'}]
+      ]}});
+  }
+  if (data.startsWith('wbank_')) {
+    const bk=data.replace('wbank_','');
+    const sn=await db.ref(`users/${uid}`).once('value'), u=sn.val();
+    if (!u) return;
+    if ((u.balance||0) < 50){bot.sendMessage(uid,'Not enough balance.');return;}
+    await db.ref(`pendingWithdraw/${uid}`).set({bankKey:bk, step:'awaiting_amount', ts:Date.now()});
+    const bank=BANKS[bk];
+    bot.sendMessage(uid,
+      `${bank.emoji} *${bank.name}* selected\n\nYour balance: *${u.balance} ETB*\n\nHow much do you want to withdraw?\nMinimum: 50 ETB\n\nReply with the amount.\nExample: 100`,
+      {parse_mode:'Markdown'});
+  }
+  if (data.startsWith('confirm_withdraw_')) {
+    if (uid!==ADMIN_ID) return;
+    const parts=data.split('_'), tuid=parts[2], wid=parts[3];
+    const wSnap=await db.ref(`withdrawals/${wid}`).once('value'), w=wSnap.val();
+    if (!w||w.status!=='pending') return;
+    await db.ref(`withdrawals/${wid}`).update({status:'completed',completedAt:Date.now()});
+    const uref=db.ref(`users/${tuid}`), u=(await uref.once('value')).val();
+    await uref.update({totalWithdrawn:(u?.totalWithdrawn||0)+w.amount});
+    try{bot.editMessageReplyMarkup({inline_keyboard:[]},{chat_id:ADMIN_ID,message_id:query.message.message_id});}catch(e){}
+    bot.sendMessage(ADMIN_ID,`✅ Withdrawal confirmed. ${w.amount} ETB sent to ${w.accountName}.`);
+    bot.sendMessage(parseInt(tuid),
+      `✅ *Withdrawal Completed!*\n\nAmount: *${w.amount} ETB*\nBank: *${w.bankName}*\nAccount: *${w.accountNumber}*\n\nMoney has been sent to your account! 🎉`,
+      {parse_mode:'Markdown'});
+    console.log(`Withdrawal confirmed: ${w.userName} withdrew ${w.amount} ETB`);
+  }
+  if (data.startsWith('reject_withdraw_')) {
+    if (uid!==ADMIN_ID) return;
+    const parts=data.split('_'), tuid=parts[2], wid=parts[3];
+    const wSnap=await db.ref(`withdrawals/${wid}`).once('value'), w=wSnap.val();
+    if (!w) return;
+    const uref=db.ref(`users/${tuid}`), u=(await uref.once('value')).val();
+    if (u) await uref.update({balance:(u.balance||0)+w.amount});
+    await db.ref(`withdrawals/${wid}`).update({status:'rejected',rejectedAt:Date.now()});
+    try{bot.editMessageReplyMarkup({inline_keyboard:[]},{chat_id:ADMIN_ID,message_id:query.message.message_id});}catch(e){}
+    bot.sendMessage(ADMIN_ID,'❌ Withdrawal rejected. Balance refunded to player.');
+    bot.sendMessage(parseInt(tuid),`❌ *Withdrawal Rejected*\n\nYour ${w.amount} ETB has been returned to your balance.\nContact support if you believe this is an error.`,{parse_mode:'Markdown'});
   }
   if (data==='leaderboard') {
     const sn=await db.ref('users').orderByChild('totalWon').limitToLast(10).once('value');
@@ -388,6 +368,57 @@ bot.on('callback_query', async query => {
 bot.on('message', async msg => {
   if (msg.text?.startsWith('/')) return;
   const uid=msg.from.id, text=msg.text?.trim(); if (!text) return;
+
+  // Check pending withdrawal first
+  const wpsn=await db.ref(`pendingWithdraw/${uid}`).once('value'), wpend=wpsn.val();
+  if (wpend) {
+    if (wpend.step==='awaiting_amount') {
+      const amt=parseInt(text);
+      const u=(await db.ref(`users/${uid}`).once('value')).val();
+      if (isNaN(amt)||amt<50){bot.sendMessage(uid,'Minimum withdrawal is 50 ETB. Enter a valid amount.');return;}
+      if (amt>(u?.balance||0)){bot.sendMessage(uid,`You only have ${u?.balance||0} ETB. Enter a smaller amount.`);return;}
+      await db.ref(`pendingWithdraw/${uid}`).update({step:'awaiting_account', amount:amt});
+      bot.sendMessage(uid,`Amount: ${amt} ETB confirmed.\n\nNow enter your ${BANKS[wpend.bankKey].name} account number:`);
+      return;
+    }
+    if (wpend.step==='awaiting_account') {
+      await db.ref(`pendingWithdraw/${uid}`).update({step:'awaiting_name', accountNumber:text});
+      bot.sendMessage(uid,`Account number saved.\n\nNow enter the full name on the account:`);
+      return;
+    }
+    if (wpend.step==='awaiting_name') {
+      const bank=BANKS[wpend.bankKey];
+      const user=(await db.ref(`users/${uid}`).once('value')).val();
+      if ((user?.balance||0) < wpend.amount){
+        bot.sendMessage(uid,'Your balance is not enough. Please start withdrawal again.');
+        await db.ref(`pendingWithdraw/${uid}`).remove();return;
+      }
+      // Hold balance immediately so they can't double-withdraw
+      await db.ref(`users/${uid}`).update({balance:(user.balance||0)-wpend.amount});
+      const wid=`wd_${uid}_${Date.now()}`;
+      await db.ref(`withdrawals/${wid}`).set({
+        withdrawId:wid, userId:uid, userName:user?.name||msg.from.first_name,
+        bankKey:wpend.bankKey, bankName:bank.name, amount:wpend.amount,
+        accountNumber:wpend.accountNumber, accountName:text,
+        status:'pending', submittedAt:Date.now()
+      });
+      await db.ref(`pendingWithdraw/${uid}`).remove();
+      bot.sendMessage(uid,
+        `📤 *Withdrawal Submitted!*\n\nBank: *${bank.name}*\nAmount: *${wpend.amount} ETB*\nAccount: *${wpend.accountNumber}*\nName: *${text}*\n\n⏳ Will be processed within 5-30 minutes.`,
+        {parse_mode:'Markdown'});
+      try {
+        await bot.sendMessage(ADMIN_ID,
+          `🏧 WITHDRAWAL REQUEST\n\nPlayer: ${user?.name||msg.from.first_name} (@${msg.from.username||'none'})\nBank: ${bank.name}\nAmount: ${wpend.amount} ETB\nAccount No: ${wpend.accountNumber}\nAccount Name: ${text}\nUser ID: ${uid}`,
+          {reply_markup:{inline_keyboard:[[
+            {text:`✅ Confirm Sent ${wpend.amount} ETB`, callback_data:`confirm_withdraw_${uid}_${wid}`},
+            {text:'❌ Reject', callback_data:`reject_withdraw_${uid}_${wid}`}
+          ]]}});
+        console.log('Admin notified of withdrawal from', uid, 'amount:', wpend.amount);
+      } catch(e){console.error('Admin withdraw notify failed:',e.message);}
+      return;
+    }
+  }
+
   const psn=await db.ref(`pendingDeposit/${uid}`).once('value'), pend=psn.val(); if (!pend) return;
   if (pend.step==='awaiting_amount') {
     const amt=parseInt(text);
@@ -405,18 +436,14 @@ bot.on('message', async msg => {
     bot.sendMessage(uid,`📋 *Deposit Submitted!*\n\nBank: ${bank.name}\nAmount: ${pend.amount} ETB\nReference: ${text}\n\n⏳ Will be verified within 5-15 minutes.`,{parse_mode:'Markdown'});
     try {
       await bot.sendMessage(ADMIN_ID,
-        `🆕 *NEW DEPOSIT*\n\nPlayer: ${user?.name||msg.from.first_name} (@${msg.from.username||'none'})\nBank: ${bank.name}\nAmount: ${pend.amount} ETB\nRef: ${text}\nUserID: ${uid}`,
-        {parse_mode:'Markdown', reply_markup:{inline_keyboard:[[
+        `🆕 NEW DEPOSIT\n\nPlayer: ${user?.name||msg.from.first_name} (@${msg.from.username||'none'})\nBank: ${bank.name}\nAmount: ${pend.amount} ETB\nRef: ${text}\nUserID: ${uid}`,
+        {reply_markup:{inline_keyboard:[[
           {text:`✅ Approve ${pend.amount} ETB`,callback_data:`approve_${uid}_${pend.amount}_${did}`},
           {text:'❌ Reject',callback_data:`reject_${uid}_${did}`}
         ]]}});
     } catch(e){console.error('Admin notify failed:',e.message);}
   }
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// API ENDPOINTS
-// ─────────────────────────────────────────────────────────────────────────────
 
 app.post('/api/user', async (req,res) => {
   const {telegramId,name,username}=req.body;
@@ -429,22 +456,15 @@ app.post('/api/user', async (req,res) => {
 
 app.post('/api/join', async (req,res) => {
   const {telegramId}=req.body;
-
-  // Don't allow joining if game already started
   const gSn=await db.ref('game/started').once('value');
   if (gSn.val()===true) return res.status(400).json({error:'Game already started. Wait for next game.'});
-
   const ref=db.ref(`users/${telegramId}`), u=(await ref.once('value')).val();
   if (!u) return res.status(404).json({error:'User not found'});
   if ((u.balance||0)<ENTRY_FEE) return res.status(400).json({error:`Not enough ETB! Need ${ENTRY_FEE} ETB.`});
-
   const nb=u.balance-ENTRY_FEE;
   await ref.update({balance:nb, gamesPlayed:(u.gamesPlayed||0)+1});
-
-  // Add to pot
   const pSn=await db.ref('game/pot').once('value');
   await db.ref('game/pot').set((pSn.val()||0)+ENTRY_FEE);
-
   console.log(`👤 Real player ${u.name} joined. Balance: ${nb}`);
   res.json({success:true, newBalance:nb});
 });
@@ -453,27 +473,21 @@ app.post('/api/payout', async (req,res) => {
   const {telegramId}=req.body;
   const pSn=await db.ref('game/paidOut').once('value');
   if (pSn.val()) return res.status(400).json({error:'Already paid out'});
-
-  // Stop engine from paying a bot
   engine.won=true;
   if (engine.ballTimer){clearInterval(engine.ballTimer);engine.ballTimer=null;}
-
   const pot=(await db.ref('game/pot').once('value')).val()||0;
   const win=Math.floor(pot*WINNER_CUT);
   const ref=db.ref(`users/${telegramId}`), u=(await ref.once('value')).val();
   if (!u) return res.status(404).json({error:'User not found'});
-
   const nb=(u.balance||0)+win;
   await ref.update({balance:nb, gamesWon:(u.gamesWon||0)+1, totalWon:(u.totalWon||0)+win});
   await db.ref('game').update({paidOut:true,
     winner:{boardNum:null,telegramId,name:u.name,isBot:false,winnings:win,ts:Date.now()}});
-
   try {
     bot.sendMessage(parseInt(telegramId),
       `🎉 *BINGO! You Won!*\n\n🏆 Winnings: *${win} ETB*\n💳 New Balance: *${nb} ETB*\n\n🎊 Congratulations!`,
       {parse_mode:'Markdown', reply_markup:{inline_keyboard:[[{text:'🎯 Play Again',web_app:{url:MINI_APP_URL}}]]}});
   } catch(e){}
-
   console.log(`🎉 Real player ${u.name} won ${win} ETB!`);
   res.json({success:true, winnings:win, newBalance:nb});
 });
