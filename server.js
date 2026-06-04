@@ -492,7 +492,7 @@ bot.on('message', async msg => {
       bot.sendMessage(uid,`Account number: ${text}\n\nNow enter the account holder full name:`);
       return;
     }
-    wpend.step==='awaiting_name') {
+    if (wpend.step==='awaiting_name') {
       const bank=BANKS[wpend.bankKey];
       const user=(await db.ref(`users/${uid}`).once('value')).val();
       if ((user?.balance||0) < wpend.amount){
