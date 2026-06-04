@@ -138,6 +138,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
         <span class="game-timer-num" id="gameTimerNum">30s</span>
       </div>
       <button class="refresh-game-btn" onclick="location.reload()">↻</button>
+      <button class="refresh-game-btn" id="speechBtn" onclick="toggleSpeech()">🔊</button>
     </div>
     <button class="leave-btn" onclick="leaveGame()">Leave</button>
   </div>
@@ -395,7 +396,11 @@ function listenBalls(){
 
   unsubBalls = onValue(r('game/balls'), snap => {
     const newBalls = snap.val() ? Object.values(snap.val()) : [];
-    if (newBalls.length > calledBalls.length) playBallSound();
+    if (newBalls.length > calledBalls.length) {
+      playBallSound();
+      const newest = newBalls[newBalls.length-1];
+      setTimeout(()=>speakBall(newest), 200);
+    }
     calledBalls = newBalls;
     calledBalls.forEach(n => autoMark(n));
     refreshCalledDisplay();
