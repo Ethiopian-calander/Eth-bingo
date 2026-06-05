@@ -138,6 +138,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
         <span class="game-timer-num" id="gameTimerNum">30s</span>
       </div>
       <button class="refresh-game-btn" onclick="location.reload()">↻</button>
+      <button class="refresh-game-btn" id="speechBtn" onclick="toggleSpeech()">🔊</button>
     </div>
     <button class="leave-btn" onclick="leaveGame()">Leave</button>
   </div>
@@ -224,6 +225,30 @@ function playTickSound(){try{const ctx=getAudio(),o=ctx.createOscillator(),g=ctx
 function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
 function letterOf(n){ if(n<=15)return'B'; if(n<=30)return'I'; if(n<=45)return'N'; if(n<=60)return'G'; return'O'; }
+
+// ── Amharic Voice (pre-recorded MP3s) ─────────────────────────
+let speechEnabled = true;
+let currentAudio = null;
+
+function speakBall(n) {
+  if (!speechEnabled) return;
+  try {
+    const letter = letterOf(n).toLowerCase();
+    const url = `sounds/${letter}${n}.mp3`;
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    currentAudio = new Audio(url);
+    currentAudio.volume = 1.0;
+    currentAudio.play().catch(e => console.log('Audio play failed:', e));
+  } catch(e) { console.log('speakBall error:', e); }
+}
+
+function toggleSpeech() {
+  speechEnabled = !speechEnabled;
+  const btn = document.getElementById('speechBtn');
+  if (btn) btn.textContent = speechEnabled ? '🔊' : '🔇';
+  if (!speechEnabled && currentAudio) { currentAudio.pause(); currentAudio = null; }
+  toast(speechEnabled ? '🔊 Voice ON' : '🔇 Voice OFF');
+}
 function ballGrad(l){ return{B:'linear-gradient(135deg,#c87d00,#f5c842)',I:'linear-gradient(135deg,#a00d40,#ff4d8f)',N:'linear-gradient(135deg,#007a8c,#00e5ff)',G:'linear-gradient(135deg,#128030,#39ff6e)',O:'linear-gradient(135deg,#5a10a8,#bf8fff)'}[l]; }
 function ballGlow(l){ return{B:'0 0 24px rgba(245,200,66,.55)',I:'0 0 24px rgba(255,77,143,.55)',N:'0 0 24px rgba(0,229,255,.55)',G:'0 0 24px rgba(57,255,110,.55)',O:'0 0 24px rgba(191,143,255,.55)'}[l]; }
 function stopAll(){ [unsubCountdown,unsubStarted,unsubBalls,unsubWinner,unsubPlayers,unsubTaken,unsubGameNum].forEach(u=>u&&u()); unsubCountdown=unsubStarted=unsubBalls=unsubWinner=unsubPlayers=unsubTaken=unsubGameNum=null; }
@@ -395,7 +420,11 @@ function listenBalls(){
 
   unsubBalls = onValue(r('game/balls'), snap => {
     const newBalls = snap.val() ? Object.values(snap.val()) : [];
-    if (newBalls.length > calledBalls.length) playBallSound();
+    if (newBalls.length > calledBalls.length) {
+      playBallSound();
+      const newest = newBalls[newBalls.length - 1];
+      setTimeout(() => speakBall(newest), 300);
+    }
     calledBalls = newBalls;
     calledBalls.forEach(n => autoMark(n));
     refreshCalledDisplay();
@@ -667,3 +696,4 @@ init();
 </script>
 </body>
 </html>
+
