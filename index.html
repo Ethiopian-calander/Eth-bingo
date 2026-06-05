@@ -342,22 +342,35 @@ function buildLobby(){
     const gateTitle = document.getElementById('gateTitle');
     const gateSub = document.getElementById('gateSub');
 
+    const phase = g.phase || '';
+    const hasGame = snap.val() !== null;
+
     if (running) {
-      // Bot game in progress - show gate, hide grid
+      // Bot game actively playing - show gate
       gate.style.display = 'flex';
       grid.style.display = 'none';
       if(gateTitle) gateTitle.textContent = 'Game in Progress';
-      if(gateSub) gateSub.textContent = 'Next game starts soon — stay here!';
-      if(info){
-        const called = g.ballCount || 0;
-        const pot = g.pot || 0;
-        info.textContent = called > 0 ? `🎱 ${called} balls called — 🏆 Pot: ${pot} ETB` : '🎲 Game starting...';
-      }
-    } else {
-      // No game running - hide gate, show grid so players can join
+      if(gateSub) gateSub.textContent = 'Wait for next game to join';
+      const called = g.ballCount || 0;
+      const pot = g.pot || 0;
+      if(info) info.textContent = called > 0 ? `🎱 ${called} balls called — 🏆 Pot: ${pot} ETB` : '🎲 Game starting...';
+    } else if (hasGame && phase === 'lobby') {
+      // Bot lobby countdown - show countdown, players can join
+      gate.style.display = 'none';
+      grid.style.display = 'grid';
+      const cd = g.countdown || 0;
+      if(info) info.textContent = '';
+      document.getElementById('lobbyPlayerCount').textContent =
+        cd > 0 ? `⏳ Game starts in ${cd}s` : '🚀 Starting!';
+    } else if (!hasGame || phase === '') {
+      // Between games - show grid
       gate.style.display = 'none';
       grid.style.display = 'grid';
       if(info) info.textContent = '';
+    } else {
+      // Any other state - show grid
+      gate.style.display = 'none';
+      grid.style.display = 'grid';
     }
   });
 
