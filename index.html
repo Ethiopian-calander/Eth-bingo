@@ -121,7 +121,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
   <div class="game-gate" id="gameGate">
     <div class="gate-icon">🎮</div>
     <div class="gate-title">Game in Progress</div>
-    <div class="gate-sub">Wait for the current game to finish</div>
+    <div class="gate-sub">Next game starts soon — stay here!</div>
+    <div id="botGameInfo" style="font-size:13px;color:var(--cyan);font-weight:700;margin-top:4px"></div>
   </div>
   <div class="num-grid" id="numGrid"></div>
 </div>
@@ -314,12 +315,37 @@ function buildLobby(){
     grid.appendChild(b);
   }
 
-  // Watch game/started — show "Game in Progress" gate when running
-  onValue(r('game/started'), snap => {
-    const running = snap.val() === true;
-    document.getElementById('gameGate').style.display       = running ? 'flex' : 'none';
-    document.getElementById('numGrid').style.pointerEvents  = running ? 'none' : 'auto';
-    document.getElementById('numGrid').style.opacity        = running ? '0.3' : '1';
+  // Watch game state — show gate with info when bot game running
+  onValue(r('game'), snap => {
+    const g = snap.val() || {};
+    const running = g.started === true;
+    document.getElementById('gameGate').style.display      = running ? 'flex' : 'none';
+    document.getElementById('numGrid').style.pointerEvents = running ? 'none' : 'auto';
+    document.getElementById('numGrid').style.opacity       = running ? '0.3' : '1';
+    const info = document.getElementById('botGameInfo');
+    if (info) {
+      if (running) {
+        const called = g.ballCount || 0;
+        const pot = g.pot || 0;
+        info.textContent = `🎱 ${called} balls called — 🏆 Pot: ${pot} ETB`;
+      } else if (g.phase === 'lobby') {
+        const cd = g.countdown || 0;
+        info.textContent = cd > 0 ? `⏳ Next game in ${cd}s` : '🚀 Starting now!';
+      } else {
+        info.textContent = '';
+      }
+    }
+  });
+
+  // Watch countdown separately for lobby phase
+  onValue(r('game/countdown'), snap => {
+    const cd = snap.val();
+    const info = document.getElementById('botGameInfo');
+    const gateVisible = document.getElementById('gameGate').style.display === 'flex';
+    if (info && !gateVisible && cd > 0) {
+      // Game not started yet, show countdown on lobby
+      document.getElementById('lobbyPlayerCount').textContent = `Next game in ${cd}s`;
+    }
   });
 
   // Watch taken numbers
