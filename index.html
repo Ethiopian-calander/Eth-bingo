@@ -234,11 +234,15 @@ function speakBall(n) {
   if (!speechEnabled) return;
   try {
     const letter = letterOf(n).toLowerCase();
-    const url = `sounds/${letter}${n}.mp3`;
+    // Use absolute path from server root
+    const url = window.location.origin + `/sounds/${letter}${n}.mp3`;
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     currentAudio = new Audio(url);
     currentAudio.volume = 1.0;
-    currentAudio.play().catch(e => console.log('Audio play failed:', e));
+    currentAudio.play().catch(e => {
+      console.log('Audio failed:', url, e.message);
+      toast('🔇 Sound file missing: ' + letter + n);
+    });
   } catch(e) { console.log('speakBall error:', e); }
 }
 
