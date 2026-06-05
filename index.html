@@ -280,23 +280,40 @@ async function updateDerash(){ try{ const s=await get(r('game/pot')); const d=Ma
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init(){
-  // Get or create user
-  if (tgUser) {
-    const res  = await fetch(`${SERVER}/api/user`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:tgUser.id,name:tgUser.first_name,username:tgUser.username||''})});
-    myUser     = await res.json();
-  } else {
-    myUser = { telegramId:'demo_'+Math.floor(Math.random()*9999), name:'Demo', balance:100 };
+  try {
+    if (tgUser) {
+      const res = await fetch(`${SERVER}/api/user`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({telegramId:tgUser.id, name:tgUser.first_name, username:tgUser.username||''})
+      });
+      if (res.ok) {
+        myUser = await res.json();
+      } else {
+        // Server error - create temp user so lobby still shows
+        myUser = { telegramId:tgUser.id, name:tgUser.first_name, balance:0 };
+      }
+    } else {
+      myUser = { telegramId:'demo_'+Math.floor(Math.random()*9999), name:'Demo', balance:100 };
+    }
+  } catch(e) {
+    console.error('Init error:', e);
+    // Still show lobby even if server is down
+    myUser = { telegramId: tgUser?.id||'guest', name: tgUser?.first_name||'Player', balance:0 };
   }
+
   updateBalance();
 
   // Watch game number
   unsubGameNum = onValue(r('gameCounter'), snap => {
     const n = snap.val()||1;
-    document.getElementById('lobbyGameNum').textContent    = 'Game #'+n;
-    document.getElementById('gameScreenNum').textContent   = 'Game #'+n;
+    const el1 = document.getElementById('lobbyGameNum');
+    const el2 = document.getElementById('gameScreenNum');
+    if(el1) el1.textContent = 'Game #'+n;
+    if(el2) el2.textContent = 'Game #'+n;
   });
 
-  // Build lobby
+  // Build lobby and show it
   buildLobby();
   show('lobbyScreen');
 }
@@ -320,8 +337,8 @@ function buildLobby(){
     const g = snap.val() || {};
     const running = g.started === true;
     document.getElementById('gameGate').style.display      = running ? 'flex' : 'none';
+    document.getElementById('numGrid').style.display       = running ? 'none' : 'grid';
     document.getElementById('numGrid').style.pointerEvents = running ? 'none' : 'auto';
-    document.getElementById('numGrid').style.opacity       = running ? '0.3' : '1';
     const info = document.getElementById('botGameInfo');
     if (info) {
       if (running) {
@@ -744,4 +761,3 @@ init();
 </script>
 </body>
 </html>
-
