@@ -8,6 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
+app.use('/sounds', express.static('sounds'));
 app.get('/', (req, res) => res.sendFile(path.resolve('./index.html')));
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -630,3 +631,4 @@ app.get('/api/balance/:telegramId', async (req,res) => {
 });
 
 app.listen(process.env.PORT||3000, ()=>console.log('🎰 Ethbingo running!'));
+
