@@ -257,6 +257,19 @@ function updateBalance(){ const b=myUser?.balance||0; document.querySelectorAll(
 async function updateDerash(){ try{ const s=await get(r('game/pot')); const d=Math.floor((s.val()||0)*0.8); document.querySelectorAll('.derash-display').forEach(el=>el.textContent=d+' ETB'); }catch(e){} }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
+// Unlock audio on first user interaction (required by browsers/Telegram)
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  // Play silent audio to unlock
+  const silent = new Audio('https://raw.githubusercontent.com/Ethiopian-calander/Eth-bingo/main/sounds/b1.mp3');
+  silent.volume = 0;
+  silent.play().then(() => { silent.pause(); silent.currentTime = 0; }).catch(()=>{});
+}
+document.addEventListener('touchstart', unlockAudio, { once: true });
+document.addEventListener('click', unlockAudio, { once: true });
+
 async function init(){
   // Get or create user
   if (tgUser) {
