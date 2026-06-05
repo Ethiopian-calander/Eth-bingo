@@ -118,13 +118,13 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
     <div class="info-pill" id="lobbyPlayerCount" style="color:var(--green);font-size:11px">0 online</div>
     <button class="refresh-btn" onclick="location.reload()">↻ Refresh</button>
   </div>
-  <div class="game-gate" id="gameGate">
+  <div class="game-gate" id="gameGate" style="display:flex">
     <div class="gate-icon">🎮</div>
-    <div class="gate-title">Game in Progress</div>
-    <div class="gate-sub">Next game starts soon — stay here!</div>
+    <div class="gate-title" id="gateTitle">Loading...</div>
+    <div class="gate-sub" id="gateSub">Connecting to game</div>
     <div id="botGameInfo" style="font-size:13px;color:var(--cyan);font-weight:700;margin-top:4px"></div>
   </div>
-  <div class="num-grid" id="numGrid"></div>
+  <div class="num-grid" id="numGrid" style="display:none"></div>
 </div>
 
 <!-- GAME SCREEN -->
@@ -336,21 +336,28 @@ function buildLobby(){
   onValue(r('game'), snap => {
     const g = snap.val() || {};
     const running = g.started === true;
-    document.getElementById('gameGate').style.display      = running ? 'flex' : 'none';
-    document.getElementById('numGrid').style.display       = running ? 'none' : 'grid';
-    document.getElementById('numGrid').style.pointerEvents = running ? 'none' : 'auto';
+    const gate = document.getElementById('gameGate');
+    const grid = document.getElementById('numGrid');
     const info = document.getElementById('botGameInfo');
-    if (info) {
-      if (running) {
+    const gateTitle = document.getElementById('gateTitle');
+    const gateSub = document.getElementById('gateSub');
+
+    if (running) {
+      // Bot game in progress - show gate, hide grid
+      gate.style.display = 'flex';
+      grid.style.display = 'none';
+      if(gateTitle) gateTitle.textContent = 'Game in Progress';
+      if(gateSub) gateSub.textContent = 'Next game starts soon — stay here!';
+      if(info){
         const called = g.ballCount || 0;
         const pot = g.pot || 0;
-        info.textContent = `🎱 ${called} balls called — 🏆 Pot: ${pot} ETB`;
-      } else if (g.phase === 'lobby') {
-        const cd = g.countdown || 0;
-        info.textContent = cd > 0 ? `⏳ Next game in ${cd}s` : '🚀 Starting now!';
-      } else {
-        info.textContent = '';
+        info.textContent = called > 0 ? `🎱 ${called} balls called — 🏆 Pot: ${pot} ETB` : '🎲 Game starting...';
       }
+    } else {
+      // No game running - hide gate, show grid so players can join
+      gate.style.display = 'none';
+      grid.style.display = 'grid';
+      if(info) info.textContent = '';
     }
   });
 
