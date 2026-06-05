@@ -225,6 +225,52 @@ function playTickSound(){try{const ctx=getAudio(),o=ctx.createOscillator(),g=ctx
 function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
 function letterOf(n){ if(n<=15)return'B'; if(n<=30)return'I'; if(n<=45)return'N'; if(n<=60)return'G'; return'O'; }
+
+// ── AMHARIC VOICE ─────────────────────────────────────────────
+const AM={1:"አንድ",2:"ሁለት",3:"ሶስት",4:"አራት",5:"አምስት",6:"ስድስት",7:"ሰባት",8:"ስምንት",9:"ዘጠኝ",10:"አስር",11:"አስራ አንድ",12:"አስራ ሁለት",13:"አስራ ሶስት",14:"አስራ አራት",15:"አስራ አምስት",16:"አስራ ስድስት",17:"አስራ ሰባት",18:"አስራ ስምንት",19:"አስራ ዘጠኝ",20:"ሃያ",21:"ሃያ አንድ",22:"ሃያ ሁለት",23:"ሃያ ሶስት",24:"ሃያ አራት",25:"ሃያ አምስት",26:"ሃያ ስድስት",27:"ሃያ ሰባት",28:"ሃያ ስምንት",29:"ሃያ ዘጠኝ",30:"ሰላሳ",31:"ሰላሳ አንድ",32:"ሰላሳ ሁለት",33:"ሰላሳ ሶስት",34:"ሰላሳ አራት",35:"ሰላሳ አምስት",36:"ሰላሳ ስድስት",37:"ሰላሳ ሰባት",38:"ሰላሳ ስምንት",39:"ሰላሳ ዘጠኝ",40:"አርባ",41:"አርባ አንድ",42:"አርባ ሁለት",43:"አርባ ሶስት",44:"አርባ አራት",45:"አርባ አምስት",46:"አርባ ስድስት",47:"አርባ ሰባት",48:"አርባ ስምንት",49:"አርባ ዘጠኝ",50:"ሃምሳ",51:"ሃምሳ አንድ",52:"ሃምሳ ሁለት",53:"ሃምሳ ሶስት",54:"ሃምሳ አራት",55:"ሃምሳ አምስት",56:"ሃምሳ ስድስት",57:"ሃምሳ ሰባት",58:"ሃምሳ ስምንት",59:"ሃምሳ ዘጠኝ",60:"ስልሳ",61:"ስልሳ አንድ",62:"ስልሳ ሁለት",63:"ስልሳ ሶስት",64:"ስልሳ አራት",65:"ስልሳ አምስት",66:"ስልሳ ስድስት",67:"ስልሳ ሰባት",68:"ስልሳ ስምንት",69:"ስልሳ ዘጠኝ",70:"ሰባ",71:"ሰባ አንድ",72:"ሰባ ሁለት",73:"ሰባ ሶስት",74:"ሰባ አራት",75:"ሰባ አምስት"};
+let speechEnabled = true;
+
+// Load voices early
+let voicesReady = false;
+window.speechSynthesis.onvoiceschanged = () => { voicesReady = true; };
+
+function speakBall(n){
+  if(!speechEnabled) return;
+  if(!AM[n]) return;
+  try{
+    const letter = letterOf(n);
+    const amText = AM[n];
+    window.speechSynthesis.cancel();
+    // Speak letter first, then Amharic number
+    const u = new SpeechSynthesisUtterance(letter + '... ' + amText);
+    const voices = window.speechSynthesis.getVoices();
+    // Try Amharic/Tigrinya voice first, then any Ethiopian, then default
+    const amVoice = voices.find(v=>v.lang==='am-ET')
+      || voices.find(v=>v.lang.startsWith('am'))
+      || voices.find(v=>v.lang.startsWith('ti'));
+    if(amVoice){ u.voice = amVoice; u.lang = amVoice.lang; }
+    else { u.lang = 'am-ET'; }
+    u.rate = 0.85;
+    u.pitch = 1.0;
+    u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  }catch(e){ console.log('Speech error:', e); }
+}
+
+function toggleSpeech(){
+  speechEnabled = !speechEnabled;
+  const btn = document.getElementById('speechBtn');
+  if(btn) btn.textContent = speechEnabled ? '🔊' : '🔇';
+  toast(speechEnabled ? '🔊 Amharic voice ON' : '🔇 Voice OFF');
+  // Test speak on enable
+  if(speechEnabled) {
+    const u = new SpeechSynthesisUtterance('ድምጽ ተከፍቷል');
+    u.lang = 'am-ET'; u.volume = 1;
+    window.speechSynthesis.speak(u);
+  }
+}
+// ── END AMHARIC ────────────────────────────────────────────────
+
 function ballGrad(l){ return{B:'linear-gradient(135deg,#c87d00,#f5c842)',I:'linear-gradient(135deg,#a00d40,#ff4d8f)',N:'linear-gradient(135deg,#007a8c,#00e5ff)',G:'linear-gradient(135deg,#128030,#39ff6e)',O:'linear-gradient(135deg,#5a10a8,#bf8fff)'}[l]; }
 function ballGlow(l){ return{B:'0 0 24px rgba(245,200,66,.55)',I:'0 0 24px rgba(255,77,143,.55)',N:'0 0 24px rgba(0,229,255,.55)',G:'0 0 24px rgba(57,255,110,.55)',O:'0 0 24px rgba(191,143,255,.55)'}[l]; }
 function stopAll(){ [unsubCountdown,unsubStarted,unsubBalls,unsubWinner,unsubPlayers,unsubTaken,unsubGameNum].forEach(u=>u&&u()); unsubCountdown=unsubStarted=unsubBalls=unsubWinner=unsubPlayers=unsubTaken=unsubGameNum=null; }
