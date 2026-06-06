@@ -11,6 +11,21 @@ app.use(express.static('.'));
 app.use('/sounds', express.static('sounds'));
 app.get('/', (req, res) => res.sendFile(path.resolve('./index.html')));
 
+// Serve sounds folder explicitly
+const fs = require('fs');
+app.get('/sounds/:file', (req, res) => {
+  const file = req.params.file;
+  const filePath = path.resolve('./sounds/' + file);
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.sendFile(filePath);
+  } else {
+    console.log('Sound not found:', filePath);
+    res.status(404).send('Not found');
+  }
+});
+
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -631,4 +646,3 @@ app.get('/api/balance/:telegramId', async (req,res) => {
 });
 
 app.listen(process.env.PORT||3000, ()=>console.log('🎰 Ethbingo running!'));
-
