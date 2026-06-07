@@ -239,7 +239,7 @@ function speakBall(n){
   if(!speechEnabled || !audioUnlocked) return;
   try{
     const letter = letterOf(n).toLowerCase();
-    const url = `${window.location.origin}/sounds/${letter}${n}.mp3`;
+    const url = `${window.location.origin}/${letter}${n}.mp3`;
     if(currentAudio){ currentAudio.pause(); currentAudio = null; }
     currentAudio = new Audio(url);
     currentAudio.volume = 1.0;
