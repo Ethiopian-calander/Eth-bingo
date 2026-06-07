@@ -11,20 +11,7 @@ app.use(express.static('.'));
 app.use('/sounds', express.static('sounds'));
 app.get('/', (req, res) => res.sendFile(path.resolve('./index.html')));
 
-// Serve sounds folder explicitly
-const fs = require('fs');
-app.get('/sounds/:file', (req, res) => {
-  const file = req.params.file;
-  const filePath = path.resolve('./sounds/' + file);
-  if (fs.existsSync(filePath)) {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.sendFile(filePath);
-  } else {
-    console.log('Sound not found:', filePath);
-    res.status(404).send('Not found');
-  }
-});
+// MP3 files served from root via express.static('.')
 
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({
