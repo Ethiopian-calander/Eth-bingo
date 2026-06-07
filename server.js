@@ -27,7 +27,7 @@ const WINNER_CUT   = 0.80;
 const MIN_DEPOSIT  = 50;
 const ADMIN_ID     = 5733202009;
 const LOBBY_SECS   = 30;
-const BALL_MS      = 1800;
+const BALL_MS      = 3000;
 
 const BANKS = {
   cbe:       { name: 'CBE Bank',          emoji: '🏦', account: '1000605418159', holder: 'Dawit Mamo' },
