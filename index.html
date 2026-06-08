@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Ethbingo</title>
+<title>EthBingo × World Cup</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -103,13 +103,32 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .confetti-p{position:fixed;border-radius:2px;animation:cfall linear forwards;z-index:201}
 @keyframes cfall{0%{transform:translateY(-14px) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+#spinBtn{
+position:fixed;bottom:90px;right:18px;width:64px;height:64px;border-radius:50%;
+background:linear-gradient(135deg,#c87d00,#f5c842);
+display:flex;align-items:center;justify-content:center;
+font-size:30px;cursor:pointer;z-index:150;
+box-shadow:0 0 20px rgba(245,200,66,.5);
+animation:spinPulse 1.6s infinite;
+}
+#spinProgress{
+position:fixed;bottom:160px;right:10px;
+background:#0f0f1b;border:1px solid #1e1e30;
+padding:8px 12px;border-radius:10px;
+font-size:11px;z-index:150;
+}
+@keyframes spinPulse{
+0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}
+}
+
 </style>
 </head>
 <body>
 <!-- Sound unlock overlay - user must tap once to enable audio -->
 <div id="soundOverlay" style="position:fixed;inset:0;background:rgba(7,7,15,.97);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
   <div style="font-family:'Abril Fatface',serif;font-size:60px;background:linear-gradient(135deg,#f5c842,#ff4d8f,#00e5ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">BINGO</div>
-  <div style="color:#eeeef8;font-size:16px;font-weight:700;text-align:center;padding:0 20px;">Ethbingo — Real Money Bingo</div>
+  <div style="color:#eeeef8;font-size:16px;font-weight:700;text-align:center;padding:0 20px;">EthBingo × World Cup — Real Money Bingo</div>
   <button onclick="enableAudio()" style="background:linear-gradient(135deg,#c87d00,#f5c842);color:#1a1200;border:none;border-radius:14px;padding:16px 40px;font-size:16px;font-weight:800;cursor:pointer;font-family:'DM Sans',sans-serif;box-shadow:0 4px 20px rgba(245,200,66,.4);">🔊 Tap to Start</button>
   <div style="color:#55557a;font-size:11px;">Enables Amharic voice calling</div>
 </div>
@@ -731,8 +750,53 @@ function spawnConfetti(){
   }, i*25);
 }
 
+
+window.spinData={games:0};
+
+function updateSpinProgress(){
+ const el=document.getElementById('spinCount');
+ if(el) el.textContent=window.spinData.games;
+}
+
+function recordCompletedGame(){
+ window.spinData.games++;
+ if(window.spinData.games>10) window.spinData.games=10;
+ localStorage.setItem('spinGames',window.spinData.games);
+ updateSpinProgress();
+}
+
+function spinReward(){
+ const r=Math.random()*100;
+ if(r<60) return 5;
+ if(r<80) return 10;
+ if(r<92) return 25;
+ if(r<98) return 50;
+ return 100;
+}
+
+window.openSpinWheel=function(){
+ const g=Number(localStorage.getItem('spinGames')||0);
+ if(g<10){
+   alert('Play '+(10-g)+' more games to unlock a spin!');
+   return;
+ }
+ const reward=spinReward();
+ localStorage.setItem('spinGames',0);
+ updateSpinProgress();
+ alert('🏆 World Cup Spin!\nYou won '+reward+' ETB');
+};
+
+window.addEventListener('load',()=>{
+ window.spinData.games=Number(localStorage.getItem('spinGames')||0);
+ updateSpinProgress();
+});
+
 // Start
 init();
 </script>
+
+<div id="spinProgress">🎡 Spin: <span id="spinCount">0</span>/10</div>
+<div id="spinBtn" onclick="openSpinWheel()">🎡</div>
+
 </body>
 </html>
