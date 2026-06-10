@@ -27,7 +27,7 @@ const WINNER_CUT   = 0.80;
 const MIN_DEPOSIT  = 50;
 const ADMIN_ID     = 5733202009;
 const LOBBY_SECS   = 30;
-const BALL_MS      = 3000;
+const BALL_MS      = 1800;
 
 const BANKS = {
   cbe:       { name: 'CBE Bank',          emoji: '🏦', account: '1000605418159', holder: 'Dawit Mamo' },
@@ -572,7 +572,16 @@ app.post('/api/join', async (req,res) => {
   if ((u.balance||0)<ENTRY_FEE) return res.status(400).json({error:`Not enough ETB! Need ${ENTRY_FEE} ETB.`});
 
   const nb=u.balance-ENTRY_FEE;
-  await ref.update({balance:nb, gamesPlayed:(u.gamesPlayed||0)+1});
+  const newGamesPlayed = (u.gamesPlayed||0)+1;
+  const spinBonus = newGamesPlayed % 5 === 0 ? 1 : 0;
+  await ref.update({
+    balance:nb,
+    gamesPlayed:newGamesPlayed,
+    spinCredits:(u.spinCredits||0)+spinBonus
+  });
+  if(spinBonus>0){
+    try{ bot.sendMessage(parseInt(telegramId),`🎰 You earned a free spin!\n\nYou've played ${newGamesPlayed} games. Open the game to use your spin!`); }catch(e){}
+  }
 
   // Add to pot
   const pSn=await db.ref('game/pot').once('value');
@@ -580,6 +589,24 @@ app.post('/api/join', async (req,res) => {
 
   console.log(`👤 Real player ${u.name} joined. Balance: ${nb}`);
   res.json({success:true, newBalance:nb});
+});
+
+app.post('/api/spin', async (req,res) => {
+  const {telegramId, prize} = req.body;
+  const ref = db.ref(`users/${telegramId}`);
+  const u = (await ref.once('value')).val();
+  if (!u) return res.status(404).json({error:'User not found'});
+  if ((u.spinCredits||0) < 1) return res.status(400).json({error:'No spin credits'});
+  const newBalance = (u.balance||0) + prize;
+  const newCredits = (u.spinCredits||0) - 1;
+  await ref.update({balance:newBalance, spinCredits:newCredits});
+  if (prize > 0) {
+    try { bot.sendMessage(parseInt(telegramId), `🎰 Spin Result: You won ${prize} ETB!
+
+New Balance: ${newBalance} ETB`); } catch(e) {}
+  }
+  console.log(`Spin: ${u.name} won ${prize} ETB`);
+  res.json({success:true, newBalance, spinCredits:newCredits});
 });
 
 app.post('/api/payout', async (req,res) => {
