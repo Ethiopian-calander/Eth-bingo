@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>EthBingo × World Cup</title>
+<title>Ethbingo</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -50,10 +50,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .called-grid-header span:nth-child(3){color:var(--cyan)}
 .called-grid-header span:nth-child(4){color:var(--green)}
 .called-grid-header span:nth-child(5){color:var(--purple)}
-.called-grid-cols{display:flex;flex-direction:column;gap:4px;width:100%}
-.called-col{display:flex;flex-direction:row;gap:2px;overflow-x:auto;scrollbar-width:none}
-.called-col::-webkit-scrollbar{display:none}
-.called-num{min-width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--muted);background:var(--card2);flex-shrink:0;transition:all .2s}
+.called-grid-cols{display:grid;grid-template-columns:repeat(5,1fr);gap:2px}
+.called-col{display:flex;flex-direction:column;gap:2px}
+.called-num{height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--muted);background:var(--card2);transition:all .2s}
 .called-num.hit{background:var(--gold2);color:#1a1200;transform:scale(1.05)}
 .called-num.hit-new{background:var(--gold);color:#1a1200;box-shadow:0 0 6px rgba(245,200,66,.7);animation:numPop .3s ease}
 @keyframes numPop{0%{transform:scale(1.3)}100%{transform:scale(1.05)}}
@@ -103,32 +102,14 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
 .confetti-p{position:fixed;border-radius:2px;animation:cfall linear forwards;z-index:201}
 @keyframes cfall{0%{transform:translateY(-14px) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-
-#spinBtn{
-position:fixed;bottom:90px;right:18px;width:64px;height:64px;border-radius:50%;
-background:linear-gradient(135deg,#c87d00,#f5c842);
-display:flex;align-items:center;justify-content:center;
-font-size:30px;cursor:pointer;z-index:150;
-box-shadow:0 0 20px rgba(245,200,66,.5);
-animation:spinPulse 1.6s infinite;
-}
-#spinProgress{
-position:fixed;bottom:160px;right:10px;
-background:#0f0f1b;border:1px solid #1e1e30;
-padding:8px 12px;border-radius:10px;
-font-size:11px;z-index:150;
-}
-@keyframes spinPulse{
-0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}
-}
-
+@keyframes spinPulse{0%,100%{box-shadow:0 0 10px rgba(245,200,66,.4)}50%{box-shadow:0 0 24px rgba(245,200,66,.9)}}
 </style>
 </head>
 <body>
 <!-- Sound unlock overlay - user must tap once to enable audio -->
 <div id="soundOverlay" style="position:fixed;inset:0;background:rgba(7,7,15,.97);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
   <div style="font-family:'Abril Fatface',serif;font-size:60px;background:linear-gradient(135deg,#f5c842,#ff4d8f,#00e5ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">BINGO</div>
-  <div style="color:#eeeef8;font-size:16px;font-weight:700;text-align:center;padding:0 20px;">EthBingo × World Cup — Real Money Bingo</div>
+  <div style="color:#eeeef8;font-size:16px;font-weight:700;text-align:center;padding:0 20px;">Ethbingo — Real Money Bingo</div>
   <button onclick="enableAudio()" style="background:linear-gradient(135deg,#c87d00,#f5c842);color:#1a1200;border:none;border-radius:14px;padding:16px 40px;font-size:16px;font-weight:800;cursor:pointer;font-family:'DM Sans',sans-serif;box-shadow:0 4px 20px rgba(245,200,66,.4);">🔊 Tap to Start</button>
   <div style="color:#55557a;font-size:11px;">Enables Amharic voice calling</div>
 </div>
@@ -145,6 +126,10 @@ font-size:11px;z-index:150;
     <div class="info-pill" id="lobbyPlayerCount" style="color:var(--green);font-size:11px">0 online</div>
     <button class="refresh-btn" onclick="location.reload()">↻ Refresh</button>
   </div>
+  <div id="spinBtnWrap" style="display:none;margin-bottom:10px">
+    <button onclick="openSpin()" style="background:linear-gradient(135deg,#c87d00,#f5c842);border:none;border-radius:50px;padding:8px 20px;font-family:'DM Sans',sans-serif;font-weight:800;font-size:13px;color:#1a1200;cursor:pointer;box-shadow:0 0 18px rgba(245,200,66,.5);animation:spinPulse 1.5s ease infinite">🎰 <span id="spinCount">1</span> Spin Ready!</button>
+  </div>
+  <div id="spinProgress" style="display:none;margin-bottom:10px;font-size:11px;color:var(--muted);text-align:center"></div>
   <div class="game-gate" id="gameGate">
     <div class="gate-icon">🎮</div>
     <div class="gate-title">Game in Progress</div>
@@ -191,6 +176,23 @@ font-size:11px;z-index:150;
     </div>
     <div class="balance-compact"><span>Balance</span><span class="balance-display" style="font-size:13px;font-weight:700">0 ETB</span></div>
   </div>
+</div>
+
+<!-- SPIN WHEEL OVERLAY -->
+<div id="spinOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:20px">
+  <div style="font-family:'Abril Fatface',serif;font-size:28px;color:var(--gold);margin-bottom:6px;letter-spacing:2px">SPIN & WIN</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:20px">Tap the wheel to spin!</div>
+  <!-- Wheel canvas -->
+  <div style="position:relative;width:280px;height:280px;margin-bottom:16px">
+    <canvas id="spinCanvas" width="280" height="280"></canvas>
+    <!-- Center pointer -->
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:24px;height:24px;background:var(--white);border-radius:50%;border:3px solid var(--bg);z-index:10;box-shadow:0 0 10px rgba(0,0,0,.5)"></div>
+    <!-- Top arrow indicator -->
+    <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-top:20px solid var(--gold);filter:drop-shadow(0 0 6px rgba(245,200,66,.8))"></div>
+  </div>
+  <button id="spinActionBtn" onclick="doSpin()" style="background:linear-gradient(135deg,#c87d00,#f5c842);border:none;border-radius:12px;padding:14px 40px;font-family:'DM Sans',sans-serif;font-weight:800;font-size:16px;color:#1a1200;cursor:pointer;box-shadow:0 4px 20px rgba(245,200,66,.4)">SPIN!</button>
+  <div id="spinResult" style="margin-top:14px;font-size:18px;font-weight:800;color:var(--white);text-align:center;min-height:28px"></div>
+  <button onclick="closeSpin()" style="margin-top:12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:8px 20px;font-family:'DM Sans',sans-serif;cursor:pointer;font-size:12px">Close</button>
 </div>
 
 <div class="win-overlay" id="winOverlay"></div>
@@ -299,6 +301,7 @@ async function init(){
     myUser = { telegramId:'demo_'+Math.floor(Math.random()*9999), name:'Demo', balance:100 };
   }
   updateBalance();
+  updateSpinUI();
 
   // Watch game number
   unsubGameNum = onValue(r('gameCounter'), snap => {
@@ -327,11 +330,18 @@ function buildLobby(){
   }
 
   // Watch game/started — show "Game in Progress" gate when running
+  let stuckTimer = null;
   onValue(r('game/started'), snap => {
     const running = snap.val() === true;
     document.getElementById('gameGate').style.display       = running ? 'flex' : 'none';
     document.getElementById('numGrid').style.pointerEvents  = running ? 'none' : 'auto';
-    document.getElementById('numGrid').style.opacity        = running ? '0.3' : '1';
+    document.getElementById('numGrid').style.opacity        = running ? '0.15' : '1';
+    // Auto-refresh if stuck in progress over 3 mins
+    if (running) {
+      if (!stuckTimer) stuckTimer = setTimeout(() => location.reload(), 3 * 60 * 1000);
+    } else {
+      if (stuckTimer) { clearTimeout(stuckTimer); stuckTimer = null; }
+    }
   });
 
   // Watch taken numbers
@@ -508,36 +518,13 @@ function renderCard(){
 function buildCalledGrid(){
   const wrap = document.getElementById('calledWrap');
   wrap.innerHTML = '';
-
-  const groups = [
-    ['B',1,15,'#f5c842'],
-    ['I',16,30,'#ff4d8f'],
-    ['N',31,45,'#00e5ff'],
-    ['G',46,60,'#39ff6e'],
-    ['O',61,75,'#bf8fff']
-  ];
-
-  groups.forEach(([letter,start,end,color]) => {
-    const row = document.createElement('div');
-    row.className = 'called-col';
-
-    const label = document.createElement('div');
-    label.className = 'called-num';
-    label.textContent = letter;
-    label.style.color = color;
-    label.style.fontWeight = '900';
-    label.style.border = '1px solid ' + color;
-    row.appendChild(label);
-
-    for(let n=start;n<=end;n++){
-      const d = document.createElement('div');
-      d.className = 'called-num';
-      d.id = 'cn' + n;
-      d.textContent = n;
-      row.appendChild(d);
+  [[1,15],[16,30],[31,45],[46,60],[61,75]].forEach(([lo,hi]) => {
+    const col = document.createElement('div'); col.className = 'called-col';
+    for (let n=lo; n<=hi; n++){
+      const d = document.createElement('div'); d.className='called-num'; d.id='cn'+n; d.textContent=n;
+      col.appendChild(d);
     }
-
-    wrap.appendChild(row);
+    wrap.appendChild(col);
   });
 }
 
@@ -738,9 +725,7 @@ async function goToLobby(){
 }
 
 window.leaveGame = goToLobby;
-window.enableAudio = enableAudio;
-window.toggleSpeech = toggleSpeech;
-  
+
 function spawnConfetti(){
   const cols=['#f5c842','#ff4d8f','#00e5ff','#39ff6e','#bf8fff','#fff'];
   for(let i=0;i<100;i++) setTimeout(()=>{
@@ -750,53 +735,192 @@ function spawnConfetti(){
   }, i*25);
 }
 
-
-window.spinData={games:0};
-
-function updateSpinProgress(){
- const el=document.getElementById('spinCount');
- if(el) el.textContent=window.spinData.games;
-}
-
-function recordCompletedGame(){
- window.spinData.games++;
- if(window.spinData.games>10) window.spinData.games=10;
- localStorage.setItem('spinGames',window.spinData.games);
- updateSpinProgress();
-}
-
-function spinReward(){
- const r=Math.random()*100;
- if(r<60) return 5;
- if(r<80) return 10;
- if(r<92) return 25;
- if(r<98) return 50;
- return 100;
-}
-
-window.openSpinWheel=function(){
- const g=Number(localStorage.getItem('spinGames')||0);
- if(g<10){
-   alert('Play '+(10-g)+' more games to unlock a spin!');
-   return;
- }
- const reward=spinReward();
- localStorage.setItem('spinGames',0);
- updateSpinProgress();
- alert('🏆 World Cup Spin!\nYou won '+reward+' ETB');
-};
-
-window.addEventListener('load',()=>{
- window.spinData.games=Number(localStorage.getItem('spinGames')||0);
- updateSpinProgress();
-});
-
 // Start
+
+// ── SPIN WHEEL ─────────────────────────────────────────────────
+const PRIZES = [
+  { label:'0 ETB',   amount:0,   color:'#1e1e30', prob:70 },
+  { label:'5 ETB',   amount:5,   color:'#128030', prob:15 },
+  { label:'25 ETB',  amount:25,  color:'#007a8c', prob:8  },
+  { label:'50 ETB',  amount:50,  color:'#a00d40', prob:5  },
+  { label:'100 ETB', amount:100, color:'#c87d00', prob:2  },
+];
+const GAMES_PER_SPIN = 5;
+let spinSpinning = false;
+
+function drawWheel(rotationRad) {
+  const canvas = document.getElementById('spinCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const cx = 140, cy = 140, radius = 130;
+  const total = PRIZES.length;
+  const arc = (2 * Math.PI) / total;
+  ctx.clearRect(0, 0, 280, 280);
+  PRIZES.forEach((p, i) => {
+    const start = rotationRad + i * arc;
+    const end = start + arc;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, start, end);
+    ctx.closePath();
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.strokeStyle = '#07070f';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Label
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(start + arc / 2);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#eeeef8';
+    ctx.font = 'bold 13px DM Sans';
+    ctx.fillText(p.label, radius - 12, 5);
+    ctx.restore();
+  });
+  // Center circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
+  ctx.fillStyle = '#07070f';
+  ctx.fill();
+}
+
+function updateSpinUI() {
+  if (!myUser) return;
+  const games = myUser.gamesPlayed || 0;
+  const spins = myUser.spinCredits || 0;
+  const wrap = document.getElementById('spinBtnWrap');
+  const prog = document.getElementById('spinProgress');
+  const cnt  = document.getElementById('spinCount');
+  if (spins > 0) {
+    if (wrap) { wrap.style.display = 'block'; }
+    if (cnt)  { cnt.textContent = spins; }
+    if (prog) { prog.style.display = 'none'; }
+  } else {
+    if (wrap) { wrap.style.display = 'none'; }
+    const gamesLeft = GAMES_PER_SPIN - (games % GAMES_PER_SPIN);
+    if (prog) {
+      prog.style.display = 'block';
+      prog.textContent = `🎰 Play ${gamesLeft} more game${gamesLeft>1?'s':''} to earn a spin`;
+    }
+  }
+}
+
+function openSpin() {
+  if (!myUser || (myUser.spinCredits || 0) < 1) { toast('No spins available!'); return; }
+  const overlay = document.getElementById('spinOverlay');
+  overlay.style.display = 'flex';
+  document.getElementById('spinResult').textContent = '';
+  document.getElementById('spinActionBtn').disabled = false;
+  document.getElementById('spinActionBtn').textContent = 'SPIN!';
+  spinSpinning = false;
+  drawWheel(0);
+}
+
+function closeSpin() {
+  document.getElementById('spinOverlay').style.display = 'none';
+}
+
+function pickPrize() {
+  const rand = Math.random() * 100;
+  let cumulative = 0;
+  for (const p of PRIZES) {
+    cumulative += p.prob;
+    if (rand < cumulative) return p;
+  }
+  return PRIZES[0];
+}
+
+async function doSpin() {
+  if (spinSpinning) return;
+  if ((myUser.spinCredits || 0) < 1) { toast('No spins!'); return; }
+  spinSpinning = true;
+  const btn = document.getElementById('spinActionBtn');
+  btn.disabled = true;
+  btn.textContent = 'Spinning...';
+  document.getElementById('spinResult').textContent = '';
+
+  const prize = pickPrize();
+  const prizeIndex = PRIZES.indexOf(prize);
+  const total = PRIZES.length;
+  const arc = (2 * Math.PI) / total;
+
+  // Calculate target rotation so prize lands under top arrow
+  const targetAngle = 2 * Math.PI * 5 + (Math.PI * 1.5) - (prizeIndex * arc + arc / 2);
+  const duration = 4000;
+  const start = performance.now();
+  const startRot = 0;
+
+  function animate(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    // Ease out cubic
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const rot = startRot + targetAngle * ease;
+    drawWheel(rot);
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      // Done spinning
+      spinSpinning = false;
+      showSpinResult(prize);
+    }
+  }
+  requestAnimationFrame(animate);
+
+  // Deduct spin credit and give prize via server
+  try {
+    const res = await fetch(`${SERVER}/api/spin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegramId: myUser.telegramId, prize: prize.amount })
+    });
+    const data = await res.json();
+    if (data.newBalance !== undefined) {
+      myUser.balance = data.newBalance;
+      myUser.spinCredits = data.spinCredits;
+      updateBalance();
+      updateSpinUI();
+    }
+  } catch(e) { console.log('Spin API error:', e); }
+}
+
+function showSpinResult(prize) {
+  const btn = document.getElementById('spinActionBtn');
+  const result = document.getElementById('spinResult');
+  if (prize.amount === 0) {
+    result.textContent = '😔 Better luck next time!';
+    result.style.color = 'var(--muted)';
+    btn.textContent = 'Try Again';
+  } else {
+    result.textContent = `🎉 You won ${prize.amount} ETB!`;
+    result.style.color = 'var(--gold)';
+    btn.textContent = 'Spin Again';
+    spawnConfetti();
+  }
+  btn.disabled = false;
+  btn.onclick = () => {
+    if ((myUser.spinCredits || 0) > 0) {
+      document.getElementById('spinResult').textContent = '';
+      btn.disabled = false;
+      btn.textContent = 'SPIN!';
+      btn.onclick = doSpin;
+      spinSpinning = false;
+      drawWheel(0);
+      doSpin();
+    } else {
+      closeSpin();
+    }
+  };
+}
+
+window.openSpin  = openSpin;
+window.closeSpin = closeSpin;
+window.doSpin    = doSpin;
+// ── END SPIN ────────────────────────────────────────────────────
+
 init();
 </script>
-
-<div id="spinProgress">🎡 Spin: <span id="spinCount">0</span>/10</div>
-<div id="spinBtn" onclick="openSpinWheel()">🎡</div>
-
 </body>
 </html>
+
