@@ -265,8 +265,8 @@ async function payBot(botId, pot) {
 
   // Write winner info including the bot's cartela so frontend can display it
   await db.ref('game').update({
-    paidOut: true, await db.ref('game/started').set(false);
-      winner: {
+    paidOut: true,
+    winner: {
       boardNum:   bot.num,
       telegramId: botId,
       name:       bot.name,
