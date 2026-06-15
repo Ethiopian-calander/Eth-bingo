@@ -121,6 +121,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
     <div class="info-pill gold" id="lobbyGameNum">Game #1</div>
     <div class="info-pill">Balance: <span class="balance-display">0 ETB</span></div>
     <div class="info-pill">Bet: 10 ETB</div>
+    <div class="info-pill" onclick="openDeposit()" style="color:var(--gold);border-color:rgba(245,200,66,.3);cursor:pointer;background:linear-gradient(135deg,rgba(245,200,66,.1),rgba(255,77,143,.06))">+ Deposit</div>
   </div>
   <div class="lobby-actions">
     <div class="info-pill" id="lobbyPlayerCount" style="color:var(--green);font-size:11px">0 online</div>
@@ -193,6 +194,44 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;bac
   <button id="spinActionBtn" onclick="doSpin()" style="background:linear-gradient(135deg,#c87d00,#f5c842);border:none;border-radius:12px;padding:14px 40px;font-family:'DM Sans',sans-serif;font-weight:800;font-size:16px;color:#1a1200;cursor:pointer;box-shadow:0 4px 20px rgba(245,200,66,.4)">SPIN!</button>
   <div id="spinResult" style="margin-top:14px;font-size:18px;font-weight:800;color:var(--white);text-align:center;min-height:28px"></div>
   <button onclick="closeSpin()" style="margin-top:12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:8px 20px;font-family:'DM Sans',sans-serif;cursor:pointer;font-size:12px">Close</button>
+</div>
+
+<!-- DEPOSIT POPUP -->
+<div id="depositPopup" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:400;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#0f0f1b;border:1px solid #1e1e30;border-radius:18px;padding:24px;width:100%;max-width:360px;position:relative">
+    <button onclick="closeDeposit()" style="position:absolute;top:12px;right:12px;background:transparent;border:none;color:#55557a;font-size:22px;cursor:pointer;line-height:1">×</button>
+    <div style="font-family:'Abril Fatface',serif;font-size:22px;color:#f5c842;margin-bottom:4px">Deposit ETB</div>
+    <div style="font-size:12px;color:#55557a;margin-bottom:16px">Send to any account below then enter your reference</div>
+    <!-- CBE -->
+    <div style="background:#13131f;border:1px solid #1e1e30;border-radius:10px;padding:12px;margin-bottom:8px">
+      <div style="font-size:11px;color:#55557a;margin-bottom:2px">🏦 CBE Bank</div>
+      <div style="font-size:15px;font-weight:700;color:#eeeef8;letter-spacing:1px">1000605418159</div>
+      <div style="font-size:12px;color:#55557a">Dawit Mamo</div>
+    </div>
+    <!-- Telebirr -->
+    <div style="background:#13131f;border:1px solid #1e1e30;border-radius:10px;padding:12px;margin-bottom:8px">
+      <div style="font-size:11px;color:#55557a;margin-bottom:2px">📱 Telebirr</div>
+      <div style="font-size:15px;font-weight:700;color:#eeeef8;letter-spacing:1px">0980462375</div>
+      <div style="font-size:12px;color:#55557a">Dawit Mamo</div>
+    </div>
+    <!-- Abyssinia -->
+    <div style="background:#13131f;border:1px solid #1e1e30;border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="font-size:11px;color:#55557a;margin-bottom:2px">🏛️ Bank of Abyssinia</div>
+      <div style="font-size:15px;font-weight:700;color:#eeeef8;letter-spacing:1px">206543108</div>
+      <div style="font-size:12px;color:#55557a">Dawit Mamo</div>
+    </div>
+    <!-- Transaction ref input -->
+    <div style="font-size:12px;color:#eeeef8;margin-bottom:6px;font-weight:700">Transaction Reference</div>
+    <input id="txnRefInput" type="text" placeholder="e.g. FT25160PLPSH88713517" style="width:100%;background:#13131f;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;color:#eeeef8;font-size:13px;font-family:'DM Sans',sans-serif;margin-bottom:8px;outline:none">
+    <div style="font-size:11px;color:#55557a;margin-bottom:12px">Also choose the bank you sent from:</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button onclick="selectDepBank('cbe')" id="dbCbe" style="flex:1;padding:8px;border-radius:8px;border:1px solid #1e1e30;background:#13131f;color:#55557a;font-size:11px;font-weight:700;cursor:pointer">CBE</button>
+      <button onclick="selectDepBank('telebirr')" id="dbTelebirr" style="flex:1;padding:8px;border-radius:8px;border:1px solid #1e1e30;background:#13131f;color:#55557a;font-size:11px;font-weight:700;cursor:pointer">Telebirr</button>
+      <button onclick="selectDepBank('abyssinia')" id="dbAbyssinia" style="flex:1;padding:8px;border-radius:8px;border:1px solid #1e1e30;background:#13131f;color:#55557a;font-size:11px;font-weight:700;cursor:pointer">Abyssinia</button>
+    </div>
+    <button onclick="submitDeposit()" style="width:100%;background:linear-gradient(135deg,#c87d00,#f5c842);border:none;border-radius:10px;padding:13px;font-family:'DM Sans',sans-serif;font-weight:800;font-size:14px;color:#1a1200;cursor:pointer">Submit Deposit</button>
+    <div id="depositMsg" style="margin-top:10px;font-size:12px;text-align:center;color:#55557a"></div>
+  </div>
 </div>
 
 <div class="win-overlay" id="winOverlay"></div>
@@ -917,6 +956,62 @@ function showSpinResult(prize) {
 }
 
 window.openSpin  = openSpin;
+
+// ── DEPOSIT POPUP ──────────────────────────────────────────────
+let selectedDepBank = '';
+
+function openDeposit(){
+  document.getElementById('depositPopup').style.display='flex';
+  document.getElementById('txnRefInput').value='';
+  document.getElementById('depositMsg').textContent='';
+  selectedDepBank='';
+  ['cbe','telebirr','abyssinia'].forEach(b=>{
+    const el=document.getElementById('db'+b.charAt(0).toUpperCase()+b.slice(1));
+    if(el){el.style.borderColor='#1e1e30';el.style.color='#55557a';el.style.background='#13131f';}
+  });
+}
+function closeDeposit(){
+  document.getElementById('depositPopup').style.display='none';
+}
+function selectDepBank(bank){
+  selectedDepBank=bank;
+  ['cbe','telebirr','abyssinia'].forEach(b=>{
+    const id='db'+b.charAt(0).toUpperCase()+b.slice(1);
+    const el=document.getElementById(id);
+    if(!el) return;
+    if(b===bank){el.style.borderColor='#f5c842';el.style.color='#f5c842';el.style.background='rgba(245,200,66,.1)';}
+    else{el.style.borderColor='#1e1e30';el.style.color='#55557a';el.style.background='#13131f';}
+  });
+}
+async function submitDeposit(){
+  const txn=document.getElementById('txnRefInput').value.trim();
+  const msg=document.getElementById('depositMsg');
+  if(!txn){msg.textContent='Please enter your transaction reference.';msg.style.color='#ff4d8f';return;}
+  if(!selectedDepBank){msg.textContent='Please select which bank you sent from.';msg.style.color='#ff4d8f';return;}
+  if(!myUser){msg.textContent='Please restart the app.';return;}
+  msg.textContent='Submitting...';msg.style.color='#55557a';
+  try{
+    const res=await fetch(`${SERVER}/api/deposit`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({telegramId:myUser.telegramId,bankKey:selectedDepBank,txnRef:txn,name:myUser.name||'Player'})
+    });
+    const data=await res.json();
+    if(res.ok){
+      msg.textContent='✅ Submitted! Will be verified in 5-15 minutes.';
+      msg.style.color='#39ff6e';
+      document.getElementById('txnRefInput').value='';
+      setTimeout(closeDeposit,3000);
+    } else {
+      msg.textContent=data.error||'Failed. Try again.';msg.style.color='#ff4d8f';
+    }
+  }catch(e){msg.textContent='Network error. Try again.';msg.style.color='#ff4d8f';}
+}
+window.openDeposit=openDeposit;
+window.closeDeposit=closeDeposit;
+window.selectDepBank=selectDepBank;
+window.submitDeposit=submitDeposit;
+// ── END DEPOSIT ─────────────────────────────────────────────────
+window.openSpin  = openSpin;
 window.closeSpin = closeSpin;
 window.doSpin    = doSpin;
 // ── END SPIN ────────────────────────────────────────────────────
@@ -925,4 +1020,3 @@ init();
 </script>
 </body>
 </html>
-
