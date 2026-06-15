@@ -266,6 +266,7 @@ async function payBot(botId, pot) {
   // Write winner info including the bot's cartela so frontend can display it
   await db.ref('game').update({
     paidOut: true,
+    started: false,
     winner: {
       boardNum:   bot.num,
       telegramId: botId,
@@ -273,8 +274,8 @@ async function payBot(botId, pot) {
       isBot:      true,
       winnings,
       ts:         Date.now(),
-      card:       botCard,          // bot's full cartela
-      calledNums: engine.called     // all called numbers at time of win
+      card:       botCard,
+      calledNums: engine.called
     }
   });
 
@@ -625,7 +626,7 @@ app.post('/api/payout', async (req,res) => {
 
   const nb=(u.balance||0)+win;
   await ref.update({balance:nb, gamesWon:(u.gamesWon||0)+1, totalWon:(u.totalWon||0)+win});
-  await db.ref('game').update({paidOut:true,
+  await db.ref('game').update({paidOut:true, started:false,
     winner:{boardNum:null,telegramId,name:u.name,isBot:false,winnings:win,ts:Date.now()}});
 
   try {
