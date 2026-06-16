@@ -592,6 +592,34 @@ app.post('/api/join', async (req,res) => {
   res.json({success:true, newBalance:nb});
 });
 
+app.post('/api/deposit', async (req,res) => {
+  const {telegramId, bankKey, txnRef, name} = req.body;
+  if (!telegramId || !bankKey || !txnRef) return res.status(400).json({error:'Missing fields'});
+  const bank = {
+    cbe:       {name:'CBE Bank',         emoji:'🏦'},
+    telebirr:  {name:'Telebirr',         emoji:'📱'},
+    abyssinia: {name:'Bank of Abyssinia',emoji:'🏛️'}
+  }[bankKey];
+  if (!bank) return res.status(400).json({error:'Invalid bank'});
+  const user = (await db.ref(`users/${telegramId}`).once('value')).val();
+  const did = `dep_${telegramId}_${Date.now()}`;
+  await db.ref(`deposits/${did}`).set({
+    depositId:did, userId:telegramId,
+    userName: user?.name || name || 'Player',
+    bankKey, bankName:bank.name, txnRef,
+    status:'pending', submittedAt:Date.now()
+  });
+  try {
+    await bot.sendMessage(ADMIN_ID,
+      `🆕 NEW DEPOSIT (from mini app)\n\nPlayer: ${user?.name||name}\nUser ID: ${telegramId}\nBank: ${bank.name}\nRef: ${txnRef}\n\nEnter amount to approve:`,
+      {}
+    );
+    // Store pending approval
+    await db.ref(`pendingApproval/${telegramId}`).set({did, telegramId, bankName:bank.name, txnRef, ts:Date.now()});
+  } catch(e) { console.error('Admin notify failed:', e.message); }
+  res.json({success:true});
+});
+
 app.post('/api/spin', async (req,res) => {
   const {telegramId, prize} = req.body;
   const ref = db.ref(`users/${telegramId}`);
